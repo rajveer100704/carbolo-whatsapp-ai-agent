@@ -1,0 +1,24 @@
+# Tasks - CarBOLO WhatsApp Agent Bonus Features
+
+- `[x]` Save stable branch state using copy backups (`.bak` files)
+- `[x]` Delete active database `data/carbolo.db` to ensure schema updates are applied
+- `[x]` Implement calendar event cancellation:
+  - `[x]` Add `delete` mock support in `app/calendar/google_client.py`
+  - `[x]` Implement `delete_test_drive_event()` in `app/calendar/booking.py`
+- `[x]` Implement scheduler job cancellation:
+  - `[x]` Add `cancel_reminder_job()` in `app/scheduler/reminders.py`
+- `[x]` Refactor agent NLU for rescheduling:
+  - `[x]` Update Gemini prompt in `app/agent/intent.py` to support `INTENT_RESCHEDULE`
+- `[x]` Refactor State Machine in `app/agent/state.py`:
+  - `[x]` Define new states: `STATE_QUALIFYING_BUDGET`, `STATE_QUALIFYING_TIMELINE`, `STATE_QUALIFYING_FUEL`
+  - `[x]` Refactor `transition_state()` into structured state handler functions (`handle_idle`, `handle_car_selected`, etc.)
+  - `[x]` Implement lead qualification logic (checking for already extracted parameters first)
+  - `[x]` Implement Q&A interruption handling within qualification states
+  - `[x]` Implement cancellation & rescheduling cleanup of calendar events and scheduler jobs
+  - `[x]` Prevent rescheduling from modifying database rows in-place; create new rows and set old ones to CANCELLED or RESCHEDULED
+  - `[x]` Add qualification attempts count to database session/state and add loop protection
+- `[x]` Write and run tests:
+  - `[x]` Add tests to `tests/test_agent.py` for lead qualification, rescheduling, returning user greet, and loop protection
+  - `[x]` Execute `python -m pytest` and make sure all tests pass
+- `[x]` Manual verification:
+  - `[x]` Restart Uvicorn server and verify flows

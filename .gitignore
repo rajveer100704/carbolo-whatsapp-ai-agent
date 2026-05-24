@@ -1,0 +1,30 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# DB and local state
+*.db
+*.db-journal
+data/
+logs/
+
+# Environments
+.env
+.venv
+venv/
+ENV/
+env/
+
+# IDE files
+.vscode/
+.idea/
+
+# Testing
+.pytest_cache/
+
+# Credentials
+service_account.json
+credentials.json
+client_secret*.json
