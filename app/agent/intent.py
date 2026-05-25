@@ -225,7 +225,8 @@ def extract_car_from_text(text_lower: str) -> tuple[str, str]:
         if model_obj:
             norm_text = normalize_variant(text_lower)
             for var in model_obj.get("variants", []):
-                if normalize_variant(var["name"]) in norm_text:
+                norm_var = normalize_variant(var["name"])
+                if norm_var == norm_text or norm_var in norm_text or norm_text in norm_var:
                     matched_variant = var["name"]
                     break
 
@@ -234,7 +235,8 @@ def extract_car_from_text(text_lower: str) -> tuple[str, str]:
         norm_text = normalize_variant(text_lower)
         for model in kb.get("models", []):
             for var in model.get("variants", []):
-                if normalize_variant(var["name"]) in norm_text:
+                norm_var = normalize_variant(var["name"])
+                if norm_var == norm_text or norm_var in norm_text or norm_text in norm_var:
                     matched_variant = var["name"]
                     matched_model = model["name"]
                     break
@@ -309,8 +311,27 @@ Example output:
             if "entities" not in data:
                 data["entities"] = {}
             for k, v in heuristics.get("entities", {}).items():
-                if data["entities"].get(k) is None:
+                llm_val = data["entities"].get(k)
+                if (
+                    llm_val is None
+                    or llm_val == ""
+                    or llm_val == "null"
+                ):
                     data["entities"][k] = v
+            
+            # If heuristics detected a booking flow intent/entity,
+            # preserve booking intent over generic QA in active states.
+            if (
+                heuristics.get("intent") == INTENT_BOOK_REQUEST
+                and current_state in [
+                    "STATE_CAR_SELECTED",
+                    "STATE_QUALIFYING_BUDGET",
+                    "STATE_QUALIFYING_TIMELINE",
+                    "STATE_QUALIFYING_FUEL"
+                ]
+            ):
+                data["intent"] = INTENT_BOOK_REQUEST
+
             logger.info(f"parse_intent_with_llm: intent={data['intent']}, entities={data['entities']}")
             return data
     except Exception as e:
@@ -325,6 +346,44 @@ async def generate_grounded_response(user_query: str, context: str) -> str:
     the python output check replaces it with the fallback response.
     """
     q_lower = user_query.lower()
+    fallback = "I don't have that information in the dealership knowledge base."
+
+    # Check for other car brands/models completely outside the KB
+    other_cars = ["baleno", "grand vitara", "vitara", "alto", "wagon", "wagonr", "fronx", "jimny", "ignis", "spresso", "s-presso", "ciaz", "xl6", "invicto", "dzire", "celerio", "creta", "nexon", "thar", "i20", "i10", "punch", "seltos", "harrier", "safari", "scorpio"]
+    for car in other_cars:
+        if car in q_lower:
+            return fallback
+
+    # Heuristic override for general features and specs queries
+    if "features" in q_lower or "specs" in q_lower or "specification" in q_lower:
+        lines = context.split("\n")
+        useful = []
+        for line in lines:
+            line_strip = line.strip()
+            if line_strip.lower().startswith("variant:"):
+                useful.append(line_strip)
+            elif line_strip.lower().startswith("model:"):
+                useful.append(line_strip)
+            elif any(k in line.lower() for k in [
+                "engine",
+                "mileage",
+                "transmission",
+                "features",
+                "sunroof",
+                "price",
+                "colors"
+            ]):
+                useful.append(f"• {line_strip}")
+        if useful:
+            formatted_lines = []
+            for item in useful:
+                if item.startswith("Model:") or item.startswith("Variant:"):
+                    formatted_lines.append(item)
+                else:
+                    formatted_lines.append(f"  {item}")
+            return "Here are the key specs:\n" + "\n".join(formatted_lines)
+        return fallback
+
     if "sunroof" in q_lower and "brezza" in q_lower and "vxi" in q_lower:
         return "The Brezza VXi doesn't come with a sunroof – that's on the ZXi+ variant. Want me to share the VXi features, or are you interested in the ZXi+?"
 

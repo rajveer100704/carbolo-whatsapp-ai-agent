@@ -249,9 +249,14 @@ async def handle_car_selected(
     now: datetime,
     now_naive: datetime
 ) -> str:
+    logger.info(
+        f"[FSM_DEBUG] intent={intent} | "
+        f"entities={entities} | "
+        f"user_message={user_message}"
+    )
     if not user_state.selected_car_variant:
         variant = entities.get("car_variant")
-        if not variant:
+        if variant in [None, "", "null"]:
             from app.agent.intent import extract_variant_for_model
             extracted_variant = extract_variant_for_model(
                 user_state.selected_car_model,
@@ -265,7 +270,7 @@ async def handle_car_selected(
             )
             variant = extracted_variant
         
-        if variant:
+        if variant and variant not in ["", "null"]:
             # Validate variant is in knowledgebase for this model
             from app.rag.kb_loader import KnowledgeBase
             kb_variant = KnowledgeBase.get_variant_details(user_state.selected_car_model, variant)
