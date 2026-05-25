@@ -60,17 +60,25 @@ async def test_kb_grounding():
     assert "Variant: VXi" in context
     assert "Sunroof: NO" in context
 
-    # Test the strict output guardrail
+    # Test the strict output guardrail blocks positive hallucinated claims
     valid = validate_and_guard_response("The Maruti Brezza VXi has sunroof.", context, "sunroof details for VXi?")
     assert "I don't have that information in the dealership knowledge base." in valid
+
+    # Test that valid negative grounded answers are ALLOWED
+    valid_neg = validate_and_guard_response("No, the Brezza VXi does not come with a sunroof.", context, "sunroof details for VXi?")
+    assert "does not come with a sunroof" in valid_neg
 
     # Swift LXi doesn't have ADAS
     context_swift = retrieve_context("Swift LXi me ADAS features hai kya?")
     assert "Model: Maruti Swift" in context_swift
     assert "Variant: LXi" in context_swift
-    # Check that ADAS keyword is not in the context, triggering fallback
+    # Check that ADAS keyword in query triggers fallback immediately
     valid_swift = validate_and_guard_response("Yes, the Swift LXi comes with ADAS features.", context_swift, "ADAS features in Swift LXi?")
     assert "I don't have that information in the dealership knowledge base." in valid_swift
+    
+    # Check that query with ADAS even with a negative response triggers fallback
+    valid_swift_neg = validate_and_guard_response("No, the Swift LXi does not have ADAS.", context_swift, "Does it have ADAS?")
+    assert "I don't have that information in the dealership knowledge base." in valid_swift_neg
 
 @pytest.mark.asyncio
 async def test_intent_detection():
@@ -643,3 +651,44 @@ async def test_reschedule_flow():
         assert user_state.selected_car_variant == "ZXi+"
 
     ReminderScheduler.stop()
+
+@pytest.mark.asyncio
+async def test_variant_normalization():
+    """Tests that variants and models are extracted robustly across cases, spacing, and aliases."""
+    from app.utils.normalization import normalize_variant
+    from app.rag.kb_loader import KnowledgeBase
+    from app.agent.intent import extract_car_from_text
+
+    # Test normalization helper
+    assert normalize_variant("ZXi+") == "zxiplus"
+    assert normalize_variant("zxi plus") == "zxiplus"
+    assert normalize_variant("v-xi") == "vxi"
+    assert normalize_variant("V Xi") == "vxi"
+    assert normalize_variant("Z&Xi") == "zandxi"
+
+    # Test KnowledgeBase matching
+    v1 = KnowledgeBase.get_variant_details("Maruti Brezza", "vxi")
+    assert v1 is not None
+    assert v1["name"] == "VXi"
+
+    v2 = KnowledgeBase.get_variant_details("brezza", "zxiplus")
+    assert v2 is not None
+    assert v2["name"] == "ZXi+"
+
+    v3 = KnowledgeBase.get_variant_details("swift", "zxi plus")
+    assert v3 is not None
+    assert v3["name"] == "ZXi+"
+
+    # Test extract_car_from_text
+    m, v = extract_car_from_text("kal brezza vxi ka drive book karna hai")
+    assert m == "Maruti Brezza"
+    assert v == "VXi"
+
+    m, v = extract_car_from_text("swift zxi plus chahiye")
+    assert m == "Maruti Swift"
+    assert v == "ZXi+"
+
+    m, v = extract_car_from_text("booking request for ertiga zxi+")
+    assert m == "Maruti Ertiga"
+    assert v == "ZXi+"
+

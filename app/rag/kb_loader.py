@@ -1,6 +1,7 @@
 import os
 import json
 import logging
+from app.utils.normalization import normalize_variant
 
 logger = logging.getLogger(__name__)
 
@@ -49,11 +50,15 @@ class KnowledgeBase:
         model = cls.get_model_details(model_name)
         if not model:
             return None
+        
+        norm_search = normalize_variant(variant_name)
+        
         for var in model.get("variants", []):
-            if var["name"].lower() == variant_name.lower():
+            if normalize_variant(var["name"]) == norm_search:
                 return var
         # Try soft match
         for var in model.get("variants", []):
-            if variant_name.lower() in var["name"].lower() or var["name"].lower() in variant_name.lower():
+            norm_var = normalize_variant(var["name"])
+            if norm_search in norm_var or norm_var in norm_search:
                 return var
         return None

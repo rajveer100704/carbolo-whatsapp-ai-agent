@@ -5,6 +5,13 @@ import logging
 from datetime import datetime, timedelta
 import google.generativeai as genai
 from app.rag.kb_loader import KnowledgeBase
+from app.utils.normalization import normalize_variant
+
+MODEL_ALIASES = {
+    "brezza": "Maruti Brezza",
+    "swift": "Maruti Swift",
+    "ertiga": "Maruti Ertiga",
+}
 
 logger = logging.getLogger(__name__)
 
@@ -138,44 +145,55 @@ def parse_intent_heuristics(text: str, current_state: str) -> dict:
     }
 
 def extract_car_from_text(text_lower: str) -> tuple[str, str]:
-    """Helper to extract model and variant names using regex from text."""
+    """Helper to extract model and variant names using regex/normalization from text."""
     kb = KnowledgeBase.load()
     matched_model = None
     matched_variant = None
 
-    # Check model names (e.g. brezza, swift, ertiga)
-    for model in kb.get("models", []):
-        model_name = model["name"].lower()
-        # look for single word match (e.g., brezza in "maruti brezza")
-        for word in model_name.split():
-            if len(word) > 3 and word in text_lower:
-                matched_model = model["name"]
-                # Now check variants for this model
-                for var in model.get("variants", []):
-                    var_name = var["name"].lower()
-                    if var_name in text_lower:
-                        matched_variant = var["name"]
-                        break
-                    # Special check for "zxi plus" -> "zxi+"
-                    if "zxi" in var_name and "+" in var_name and "zxi plus" in text_lower:
-                        matched_variant = var["name"]
-                        break
-                break
-        if matched_model:
+    # 1. Try matching model via alias first (direct match)
+    for alias, canonical in MODEL_ALIASES.items():
+        if alias in text_lower:
+            matched_model = canonical
             break
 
-    # If no model matched but variant matched, look for variant globally
+    # 2. Try matching model via KB split words
     if not matched_model:
         for model in kb.get("models", []):
+            model_name = model["name"].lower()
+            for word in model_name.split():
+                if len(word) > 3 and word in text_lower:
+                    matched_model = model["name"]
+                    break
+            if matched_model:
+                break
+
+    # 3. If model matched, search for variant of that model in normalized text
+    if matched_model:
+        model_obj = None
+        for m in kb.get("models", []):
+            if m["name"].lower() == matched_model.lower():
+                model_obj = m
+                break
+        if model_obj:
+            norm_text = normalize_variant(text_lower)
+            for var in model_obj.get("variants", []):
+                if normalize_variant(var["name"]) in norm_text:
+                    matched_variant = var["name"]
+                    break
+
+    # 4. If no model matched, try to infer model from a matched variant globally
+    if not matched_model:
+        norm_text = normalize_variant(text_lower)
+        for model in kb.get("models", []):
             for var in model.get("variants", []):
-                var_name = var["name"].lower()
-                if var_name in text_lower:
+                if normalize_variant(var["name"]) in norm_text:
                     matched_variant = var["name"]
                     matched_model = model["name"]
                     break
             if matched_model:
                 break
-                
+
+    logger.info(f"extract_car_from_text: text='{text_lower}' -> model={matched_model}, variant={matched_variant}")
     return matched_model, matched_variant
 
 async def parse_intent_with_llm(text: str, current_state: str) -> dict:
@@ -359,30 +377,61 @@ def validate_and_guard_response(reply: str, context: str, user_query: str) -> st
     fallback = "I don't have that information in the dealership knowledge base."
     q_lower = user_query.lower()
     
-    # Check for other car brands/models completely outside the KB
+    # 1. Check for other car brands/models completely outside the KB
     other_cars = ["baleno", "grand vitara", "vitara", "alto", "wagon", "wagonr", "fronx", "jimny", "ignis", "spresso", "s-presso", "ciaz", "xl6", "invicto", "dzire", "celerio", "creta", "nexon", "thar", "i20", "i10", "punch", "seltos", "harrier", "safari", "scorpio"]
     for car in other_cars:
         if car in q_lower:
             return fallback
-    
-    # Check sunroof contradiction
+
+    # 2. Block unknown features completely (force fallback)
+    UNKNOWN_FEATURES = ["adas", "ventilated", "awd", "4wd", "all wheel drive", "four wheel drive", "hybrid"]
+    for uf in UNKNOWN_FEATURES:
+        if uf in q_lower:
+            logger.warning(f"Guardrail triggered: Unknown feature '{uf}' requested in query.")
+            return fallback
+
+    # Helper to check if a reply asserts a feature's presence without negation
+    def is_positive_assertion(text: str) -> bool:
+        has_positive = (
+            "yes" in text or 
+            "has" in text or 
+            "have" in text or 
+            "comes with" in text or 
+            "is available" in text or 
+            "equipped" in text or 
+            "features" in text
+        )
+        has_negation = (
+            "no" in text or 
+            "not" in text or 
+            "doesn't" in text or 
+            "don't" in text or 
+            "nahi" in text or 
+            "na " in text or 
+            "without" in text or 
+            "lacks" in text
+        )
+        return has_positive and not has_negation
+
+    # 3. Check sunroof contradiction (sunroof is a known feature, value can be YES or NO)
     if "sunroof" in q_lower:
         if "sunroof: no" in context.lower():
-            if "yes" in reply_lower or "has" in reply_lower or "comes with" in reply_lower or "is available" in reply_lower:
+            if is_positive_assertion(reply_lower):
                 logger.warning(f"Guardrail triggered for sunroof contradiction in LLM reply: '{reply}'")
                 return fallback
                 
-    # Check diesel / cng contradiction
+    # 4. Check diesel / cng contradiction
     if "diesel" in q_lower or "cng" in q_lower:
         if "diesel" not in context.lower() and "cng" not in context.lower():
-            if "yes" in reply_lower or "has" in reply_lower or "comes with" in reply_lower or "is available" in reply_lower or "fuel" in reply_lower:
+            if is_positive_assertion(reply_lower) or "fuel" in reply_lower:
+                logger.warning(f"Guardrail triggered for diesel/cng contradiction in LLM reply: '{reply}'")
                 return fallback
 
-    # If customer queries an ungrounded feature, check if context has it.
-    for feature in ["adas", "all wheel drive", "awd", "4wd", "ventilated", "panoramic", "cruise"]:
+    # 5. For other features, if they are not in the context, check for positive assertions
+    for feature in ["all wheel drive", "awd", "4wd", "ventilated", "panoramic", "cruise"]:
         if feature in q_lower:
             if feature not in context.lower():
-                if "yes" in reply_lower or "comes with" in reply_lower or "features" in reply_lower or "has" in reply_lower:
+                if is_positive_assertion(reply_lower):
                     logger.warning(f"Guardrail triggered for ungrounded feature '{feature}' in LLM reply: '{reply}'")
                     return fallback
 
