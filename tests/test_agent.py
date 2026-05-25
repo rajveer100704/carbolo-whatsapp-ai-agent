@@ -692,3 +692,45 @@ async def test_variant_normalization():
     assert m == "Maruti Ertiga"
     assert v == "ZXi+"
 
+@pytest.mark.asyncio
+async def test_fsm_routing_and_entity_merging():
+    """Verifies that sending 'VXi' during variant selection transitions to budget flow directly without RAG interception."""
+    async with TestSessionLocal() as session:
+        user_state = await get_or_create_user_state(session, "919000000009")
+        user_state.state = "STATE_CAR_SELECTED"
+        user_state.selected_car_model = "Maruti Brezza"
+        user_state.selected_car_variant = None
+        await session.commit()
+
+    async with TestSessionLocal() as session:
+        user_state = await get_or_create_user_state(session, "919000000009")
+        
+        # Simulating user typing "VXi". Heuristics/LLM will extract entity "VXi".
+        entities = {
+            "car_model": None,
+            "car_variant": "VXi",
+            "slot_index": None,
+            "date_preference": None,
+            "budget": None,
+            "timeline": None,
+            "fuel_preference": None
+        }
+        
+        reply = await transition_state(
+            session=session,
+            user_state=user_state,
+            intent="INTENT_QA", # stands for QA or generic inputs
+            entities=entities,
+            user_message="VXi",
+            customer_name="Rajveer"
+        )
+        
+        # Verify that it bypassed RAG Q&A (no fallback message prefix)
+        assert "I don't have that information" not in reply
+        # Verify that the variant was saved and budget flow was initiated
+        assert user_state.selected_car_variant == "VXi"
+        assert user_state.state == "STATE_QUALIFYING_BUDGET"
+        assert "budget" in reply.lower()
+        await session.commit()
+
+

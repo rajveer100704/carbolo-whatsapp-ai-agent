@@ -276,7 +276,7 @@ async def handle_car_selected(
                     variants_list = "LXi or ZXi+"
                 return f"Sorry, we do not offer the variant '{variant}' for the {user_state.selected_car_model}. We offer {variants_list}."
         
-        if intent == "INTENT_QA":
+        if intent == "INTENT_QA" and is_spec_query(user_message):
             context = retrieve_context(user_message)
             answer = await generate_grounded_response(user_message, context)
             variants_list = "VXi or ZXi+"
@@ -287,7 +287,7 @@ async def handle_car_selected(
         variants_list = "VXi or ZXi+"
         if "swift" in user_state.selected_car_model.lower():
             variants_list = "LXi or ZXi+"
-        return f"Please select a variant for the {user_state.selected_car_model} to continue. We offer {variants_list}."
+        return f"To continue, which variant of the {user_state.selected_car_model} would you like to drive? We offer {variants_list}."
     else:
         return await start_qualification_or_suggest_slots(user_state, now, now_naive, entities.get("date_preference"))
 
@@ -426,10 +426,12 @@ async def handle_awaiting_slot(
         return await handle_booking_init(session, user_state, entities, now_naive)
         
     else:
-        context = retrieve_context(user_message)
-        answer = await generate_grounded_response(user_message, context)
         slots_list_msg = format_slots_message(json.loads(user_state.slots_json))
-        return f"{answer}\n\nTo continue, please select a slot option:\n{slots_list_msg}"
+        if is_spec_query(user_message):
+            context = retrieve_context(user_message)
+            answer = await generate_grounded_response(user_message, context)
+            return f"{answer}\n\nTo continue, please select a slot option:\n{slots_list_msg}"
+        return f"To continue, please select a slot option:\n{slots_list_msg}"
 
 async def handle_awaiting_confirmation(
     session: AsyncSession,

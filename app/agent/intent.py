@@ -246,6 +246,8 @@ Example output:
 }}
 """
 
+    heuristics = parse_intent_heuristics(text, current_state)
+
     try:
         model = genai.GenerativeModel("gemini-2.5-flash")
         response = await model.generate_content_async(
@@ -254,13 +256,19 @@ Example output:
         )
         data = json.loads(response.text)
         
-        # Verify schema is correct
+        # Verify schema is correct and merge entities
         if "intent" in data:
+            if "entities" not in data:
+                data["entities"] = {}
+            for k, v in heuristics.get("entities", {}).items():
+                if data["entities"].get(k) is None:
+                    data["entities"][k] = v
+            logger.info(f"parse_intent_with_llm: intent={data['intent']}, entities={data['entities']}")
             return data
     except Exception as e:
         logger.error(f"Gemini intent parsing failed: {e}. Falling back to heuristics.")
 
-    return parse_intent_heuristics(text, current_state)
+    return heuristics
 
 async def generate_grounded_response(user_query: str, context: str) -> str:
     """
