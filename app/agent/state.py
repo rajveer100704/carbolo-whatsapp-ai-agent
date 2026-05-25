@@ -250,10 +250,19 @@ async def handle_car_selected(
     now_naive: datetime
 ) -> str:
     if not user_state.selected_car_variant:
-        # Try to extract variant from user message or entities
         variant = entities.get("car_variant")
         if not variant:
-            _, extracted_variant = extract_car_from_text(user_message.lower())
+            from app.agent.intent import extract_variant_for_model
+            extracted_variant = extract_variant_for_model(
+                user_state.selected_car_model,
+                user_message
+            )
+            logger.info(
+                f"[FSM] Variant extraction | "
+                f"model={user_state.selected_car_model} | "
+                f"user_message={user_message} | "
+                f"extracted_variant={extracted_variant}"
+            )
             variant = extracted_variant
         
         if variant:

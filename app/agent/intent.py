@@ -13,6 +13,37 @@ MODEL_ALIASES = {
     "ertiga": "Maruti Ertiga",
 }
 
+def extract_variant_for_model(model_name: str, text: str):
+    """
+    Extract variant using already-known FSM model context.
+    Example:
+        model_name = "Maruti Brezza"
+        text = "VXi"
+
+    Should correctly return:
+        "VXi"
+    """
+    model = KnowledgeBase.get_model_details(model_name)
+    if not model:
+        return None
+
+    norm_text = normalize_variant(text)
+
+    # Exact match
+    for var in model.get("variants", []):
+        var_name = var.get("name", "")
+        if normalize_variant(var_name) == norm_text:
+            return var_name
+
+    # Soft match
+    for var in model.get("variants", []):
+        var_name = var.get("name", "")
+        norm_var = normalize_variant(var_name)
+        if norm_text in norm_var or norm_var in norm_text:
+            return var_name
+
+    return None
+
 logger = logging.getLogger(__name__)
 
 # Constants for Intents
@@ -379,6 +410,23 @@ def generate_mock_grounded_response(user_query: str, context: str) -> str:
 
     # Feature checking
     if any(f in q_lower for f in ["adas", "ventilated", "cruise", "diesel", "cng", "awd", "4wd", "panoramic"]):
+        return fallback
+
+    if "features" in q_lower or "specs" in q_lower:
+        lines = context.split("\n")
+        useful = []
+        for line in lines:
+            if any(k in line.lower() for k in [
+                "engine",
+                "mileage",
+                "transmission",
+                "features",
+                "price",
+                "colors"
+            ]):
+                useful.append(line.strip())
+        if useful:
+            return "Here are the key specs:\n" + "\n".join(useful)
         return fallback
 
     # If general model specs query, extract from context

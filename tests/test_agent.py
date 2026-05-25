@@ -791,4 +791,65 @@ async def test_inline_slots_and_text_parsing():
         assert reply == ""
         await session.commit()
 
+@pytest.mark.asyncio
+async def test_fsm_contextual_variant_extraction():
+    """Verifies that sending 'VXi' (with no model name) in STATE_CAR_SELECTED resolves variant via FSM model context."""
+    async with TestSessionLocal() as session:
+        user_state = await get_or_create_user_state(session, "919000000011")
+        user_state.state = "STATE_CAR_SELECTED"
+        user_state.selected_car_model = "Maruti Brezza"
+        user_state.selected_car_variant = None
+        await session.commit()
+
+    async with TestSessionLocal() as session:
+        user_state = await get_or_create_user_state(session, "919000000011")
+        
+        # Simulating user typing "VXi". Heuristics will extract entity "VXi" as None due to no model name.
+        entities = {
+            "car_model": None,
+            "car_variant": None,
+            "slot_index": None,
+            "date_preference": None,
+            "budget": None,
+            "timeline": None,
+            "fuel_preference": None
+        }
+        
+        reply = await transition_state(
+            session=session,
+            user_state=user_state,
+            intent="INTENT_QA",
+            entities=entities,
+            user_message="VXi",
+            customer_name="Rajveer"
+        )
+        
+        # Verify that FSM correctly extracted 'VXi' using the Brezza context
+        assert user_state.selected_car_variant == "VXi"
+        assert user_state.state == "STATE_QUALIFYING_BUDGET"
+        assert "budget" in reply.lower()
+        await session.commit()
+
+@pytest.mark.asyncio
+async def test_features_mock_grounded_response():
+    """Verifies that asking for features/specs yields key spec lines instead of fallback."""
+    context = (
+        "Model: Maruti Brezza\n"
+        "  Variant: VXi\n"
+        "    Engine: 1.5L petrol, 103 bhp\n"
+        "    Mileage: 19.8 kmpl (claimed)\n"
+        "    Transmission: 5-speed manual\n"
+        "    Features: 6 airbags, rear AC vents, touchscreen infotainment\n"
+        "    Sunroof: NO\n"
+        "    Price (ex-showroom): ₹9.7L\n"
+        "    Colors: White, Grey, Blue"
+    )
+    
+    # Ask for features of Brezza VXi
+    reply = await generate_grounded_response("features of Brezza VXi", context)
+    assert "Here are the key specs:" in reply
+    assert "Engine: 1.5L petrol" in reply
+    assert "Features: 6 airbags" in reply
+    assert "Price (ex-showroom): ₹9.7L" in reply
+
 
