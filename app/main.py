@@ -2,18 +2,20 @@ import os
 import logging
 from contextlib import asynccontextmanager
 import uvicorn
-from fastapi import FastAPI
+from fastapi import FastAPI, Response
 from dotenv import load_dotenv
 
 # Load environment variables
 load_dotenv()
 
 # Configure logging
+log_file = "app.log"
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
     handlers=[
-        logging.StreamHandler()
+        logging.StreamHandler(),
+        logging.FileHandler(log_file, mode="a", encoding="utf-8")
     ]
 )
 logger = logging.getLogger(__name__)
@@ -57,6 +59,13 @@ def health_check():
         "app": "CarBOLO WhatsApp Agent",
         "version": "1.0.3-debug-routing"
     }
+
+@app.get("/logs")
+def get_logs():
+    if os.path.exists("app.log"):
+        with open("app.log", "r", encoding="utf-8") as f:
+            return Response(content=f.read(), media_type="text/plain")
+    return Response(content="No logs found", media_type="text/plain")
 
 if __name__ == "__main__":
     # Get port and host from env
