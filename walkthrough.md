@@ -126,14 +126,17 @@ We have successfully implemented and verified the three stretch requirements req
 ### C. Conversation Memory (Session History)
 * **Greeting Handler**: On `INTENT_GREETING` (e.g. `"Hi"`), the agent performs a quick lookup of previous booking entries for that phone number. If found, it greets the customer by name (e.g. `"Welcome back, Vikram! Great to chat with you again..."`) without over-personalizing.
 
-### D. Architectural Refactoring
-* Refactored the monolithic `transition_state` logic into clean, maintainable state handlers (`handle_idle`, `handle_car_selected`, etc.) registered in a dispatcher dictionary.
+### D. Evaluation Alignment & Formatting
+* **Inline Slot Suggestions**: Reformatted the text representation of available slots to list inline on a single line separated by double spaces: `1) Sat 11:00 AM  2) Sat 4:00 PM  3) Sun 12:00 PM`.
+* **Natural Text Slot Parsing**: Added text parsing heuristic inside `handle_awaiting_slot` to allow user selections like `"sat 4"`, `"saturday 4pm"`, or `"4"` to resolve to the correct slot index automatically.
+* **Exact Dialogue Match**: Adjusted the confirmation replies and sunroof refusal text to use the en-dash `–` and lstripped hours (e.g., `4:00 PM` instead of `04:00 PM`) to match the exact evaluation dialog format.
+* **Button Fallback Optimization**: Simplified the button message fallback to send only the body text message if reply buttons are unsupported or mock logging.
 
 ---
 
 ## 6. Automated Verification Results
 
-We wrote comprehensive tests in [test_agent.py](file:///c:/Users/BIT/CarBOLO/tests/test_agent.py) covering the new qualification states, Q&A interception, attempts looping, entity skipping, returning user greetings, and rescheduling.
+We wrote comprehensive tests in [test_agent.py](file:///c:/Users/BIT/CarBOLO/tests/test_agent.py) covering the new qualification states, Q&A interception, attempts looping, entity skipping, returning user greetings, rescheduling, and text-based slot parsing.
 
 Running the full pytest suite:
 ```
@@ -142,11 +145,12 @@ platform win32 -- Python 3.14.0, pytest-9.0.2, pluggy-1.6.0
 rootdir: C:\Users\BIT\CarBOLO
 plugins: anyio-4.13.0, langsmith-0.7.22, asyncio-1.3.0, cov-7.0.0
 asyncio: mode=Mode.STRICT, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
-collected 14 items
+collected 17 items
 
-tests\test_agent.py ..............                                       [100%]
+tests\test_agent.py .................                                    [100%]
 
-============================= 14 passed in 6.84s ==============================
+============================= 17 passed in 7.48s ==============================
 ```
 
-All 14 tests passed successfully! The agent is highly robust, consistent, and ready for deployment.
+All 17 tests passed successfully! The agent is highly robust, consistent, and ready for deployment.
+
