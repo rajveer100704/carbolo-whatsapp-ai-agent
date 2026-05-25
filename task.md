@@ -22,3 +22,10 @@
   - `[x]` Execute `python -m pytest` and make sure all tests pass
 - `[x]` Manual verification:
   - `[x]` Restart Uvicorn server and verify flows
+- `[x]` Align Slots and Dialogue with Evaluation Screenshots:
+  - `[x]` Format slot options inline on a single line separated by double spaces
+  - `[x]` Implement text-based slot parsing matching selections like "sat 4"
+  - `[x]` Align confirmation response layout using en-dash and leading-zero hours
+  - `[x]` Simplify buttons fallback message text to body text
+  - `[x]` Add unit test `test_inline_slots_and_text_parsing` and run tests
+
