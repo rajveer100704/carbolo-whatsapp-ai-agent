@@ -135,7 +135,7 @@ async def _run_reminder_logic(reminder_id: int):
         # Prepare message
         # Format time beautifully
         slot_start_ist = booking.slot_start.astimezone(IST) if booking.slot_start.tzinfo else booking.slot_start.replace(tzinfo=IST)
-        time_str = slot_start_ist.strftime("%I:%M %p")
+        time_str = slot_start_ist.strftime("%I:%M %p").lstrip("0")
         day_str = slot_start_ist.strftime("%A")
         
         if reminder.reminder_type == "24H":

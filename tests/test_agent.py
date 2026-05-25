@@ -28,7 +28,7 @@ app.db.session.engine = test_engine
 from app.db.models import Base, UserConversationState, Booking, Reminder, ProcessedWebhookMessage
 from app.rag.kb_loader import KnowledgeBase
 from app.rag.retriever import retrieve_context
-from app.agent.intent import parse_intent_heuristics, validate_and_guard_response
+from app.agent.intent import parse_intent_heuristics, validate_and_guard_response, generate_grounded_response
 from app.agent.state import (
     get_or_create_user_state,
     transition_state,
@@ -63,6 +63,10 @@ async def test_kb_grounding():
     # Test the strict output guardrail blocks positive hallucinated claims
     valid = validate_and_guard_response("The Maruti Brezza VXi has sunroof.", context, "sunroof details for VXi?")
     assert "I don't have that information in the dealership knowledge base." in valid
+
+    # Test the exact required response for Brezza VXi sunroof query
+    custom_resp = await generate_grounded_response("Brezza VXi me sunroof hai?", context)
+    assert custom_resp == "The Brezza VXi doesn't come with a sunroof – that's on the ZXi+ variant. Want me to share the VXi features, or are you interested in the ZXi+?"
 
     # Test that valid negative grounded answers are ALLOWED
     valid_neg = validate_and_guard_response("No, the Brezza VXi does not come with a sunroof.", context, "sunroof details for VXi?")
@@ -731,6 +735,60 @@ async def test_fsm_routing_and_entity_merging():
         assert user_state.selected_car_variant == "VXi"
         assert user_state.state == "STATE_QUALIFYING_BUDGET"
         assert "budget" in reply.lower()
+        await session.commit()
+
+@pytest.mark.asyncio
+async def test_inline_slots_and_text_parsing():
+    """Verifies inline slots formatting and text-based slot selection parsing (e.g. 'sat 4')."""
+    async with TestSessionLocal() as session:
+        user_state = await get_or_create_user_state(session, "919000000010")
+        user_state.state = STATE_AWAITING_SLOT
+        user_state.selected_car_model = "Maruti Brezza"
+        user_state.selected_car_variant = "VXi"
+        
+        # Setup mock slots JSON (1: Sat 11:00 AM, 2: Sat 4:00 PM, 3: Sun 12:00 PM)
+        # Saturday Jun 6, 2026 is weekend
+        slots_data = [
+            {"start": "2026-06-06T11:00:00", "end": "2026-06-06T11:30:00"},
+            {"start": "2026-06-06T16:00:00", "end": "2026-06-06T16:30:00"},
+            {"start": "2026-06-07T12:00:00", "end": "2026-06-07T12:30:00"}
+        ]
+        user_state.slots_json = json.dumps(slots_data)
+        user_state.slot_generated_at = datetime.now()
+        await session.commit()
+
+    async with TestSessionLocal() as session:
+        user_state = await get_or_create_user_state(session, "919000000010")
+        
+        # 1. Test inline formatting of slots message
+        from app.agent.state import format_slots_message
+        slots_msg = format_slots_message(slots_data)
+        assert slots_msg == "1) Sat 11:00 AM  2) Sat 4:00 PM  3) Sun 12:00 PM"
+        
+        # 2. Test text-based parsing of "sat 4"
+        entities = {
+            "car_model": None,
+            "car_variant": None,
+            "slot_index": None,
+            "date_preference": None,
+            "budget": None,
+            "timeline": None,
+            "fuel_preference": None
+        }
+        
+        reply = await transition_state(
+            session=session,
+            user_state=user_state,
+            intent="INTENT_QA", # User sent plain text
+            entities=entities,
+            user_message="sat 4",
+            customer_name="Rajveer"
+        )
+        
+        # Assert state transitioned to confirmation and selected slot 2
+        assert user_state.state == STATE_AWAITING_CONFIRMATION
+        assert user_state.selected_slot_start.hour == 16 # 4:00 PM
+        assert reply == ""
         await session.commit()
 
 

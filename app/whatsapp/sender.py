@@ -115,8 +115,7 @@ def send_whatsapp_buttons(to: str, header: str, body: str, buttons: list[tuple[s
         else:
             logger.error(f"Failed to send WhatsApp buttons to {to}. Response: {response.text}")
             # Fall back to text if buttons fail
-            button_text = f"{header}\n\n{body}\n\n" + "\n".join([f"- {title}" for _, title in buttons])
-            return send_whatsapp_message(to, button_text)
+            return send_whatsapp_message(to, body)
     except Exception as e:
         logger.error(f"Error sending WhatsApp buttons: {e}")
         return False

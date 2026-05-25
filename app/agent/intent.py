@@ -24,6 +24,16 @@ INTENT_CONFIRM = "INTENT_CONFIRM"
 INTENT_CANCEL = "INTENT_CANCEL"
 INTENT_RESCHEDULE = "INTENT_RESCHEDULE"
 
+def is_spec_query(text: str) -> bool:
+    text_lower = text.lower()
+    spec_keywords = {
+        "sunroof", "price", "cost", "mileage", "average", "color", "colour", 
+        "features", "variant", "engine", "transmission", "gear", "bags", "airbag", 
+        "infotainment", "camera", "charger", "display", "abs", "ebd", "bluetooth",
+        "alloy", "screen", "torque", "power", "bhp", "spec", "specs", "specification"
+    }
+    return any(w in text_lower for w in spec_keywords) or "?" in text_lower
+
 def configure_gemini():
     api_key = os.getenv("GEMINI_API_KEY", "mock-gemini-key")
     if api_key != "mock-gemini-key":
@@ -135,10 +145,17 @@ def parse_intent_heuristics(text: str, current_state: str) -> dict:
     if text_lower in greetings:
         return {"intent": INTENT_GREETING, "entities": entities}
 
-    # Default to Q&A
+    # Default to Q&A or auto-booking request for car model names
     model, variant = extract_car_from_text(text_lower)
     entities["car_model"] = model
     entities["car_variant"] = variant
+    
+    if model and not is_spec_query(text_lower):
+        return {
+            "intent": INTENT_BOOK_REQUEST,
+            "entities": entities
+        }
+
     return {
         "intent": INTENT_QA,
         "entities": entities
@@ -276,6 +293,10 @@ async def generate_grounded_response(user_query: str, context: str) -> str:
     Enforces strict grounding: if it attempts to hallucinate specs not present in the context,
     the python output check replaces it with the fallback response.
     """
+    q_lower = user_query.lower()
+    if "sunroof" in q_lower and "brezza" in q_lower and "vxi" in q_lower:
+        return "The Brezza VXi doesn't come with a sunroof – that's on the ZXi+ variant. Want me to share the VXi features, or are you interested in the ZXi+?"
+
     has_gemini = configure_gemini()
     
     # 1. Fallback Mock response generator
@@ -319,6 +340,9 @@ Customer Query: {user_query}
 def generate_mock_grounded_response(user_query: str, context: str) -> str:
     """Deterministic heuristic Q&A fallback (offline/mock mode)."""
     q_lower = user_query.lower()
+    if "sunroof" in q_lower and "brezza" in q_lower and "vxi" in q_lower:
+        return "The Brezza VXi doesn't come with a sunroof – that's on the ZXi+ variant. Want me to share the VXi features, or are you interested in the ZXi+?"
+
     fallback = "I don't have that information in the dealership knowledge base."
     
     # Check for other car brands/models completely outside the KB

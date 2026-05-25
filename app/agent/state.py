@@ -1,4 +1,5 @@
 import json
+import re
 import logging
 from datetime import datetime, timezone, timedelta
 from sqlalchemy import select
@@ -10,7 +11,7 @@ from app.calendar.booking import create_test_drive_event, delete_test_drive_even
 from app.scheduler.reminders import ReminderScheduler
 from app.whatsapp.sender import send_whatsapp_message, send_whatsapp_buttons
 from app.rag.retriever import retrieve_context
-from app.agent.intent import generate_grounded_response, extract_car_from_text, INTENT_RESCHEDULE
+from app.agent.intent import generate_grounded_response, extract_car_from_text, INTENT_RESCHEDULE, is_spec_query
 
 logger = logging.getLogger(__name__)
 
@@ -78,15 +79,7 @@ def update_qualification_entities(user_state, entities: dict):
     if entities.get("fuel_preference"):
         user_state.lead_fuel = entities["fuel_preference"]
 
-def is_spec_query(text: str) -> bool:
-    text_lower = text.lower()
-    spec_keywords = {
-        "sunroof", "price", "cost", "mileage", "average", "color", "colour", 
-        "features", "variant", "engine", "transmission", "gear", "bags", "airbag", 
-        "infotainment", "camera", "charger", "display", "abs", "ebd", "bluetooth",
-        "alloy", "screen", "torque", "power", "bhp", "spec", "specs", "specification"
-    }
-    return any(w in text_lower for w in spec_keywords) or "?" in text_lower
+
 
 def check_qualification_loop(user_state: UserConversationState) -> str | None:
     user_state.qualification_attempts += 1
@@ -376,14 +369,70 @@ async def handle_awaiting_slot(
     now: datetime,
     now_naive: datetime
 ) -> str:
-    if intent == "INTENT_SELECT_SLOT" or entities.get("slot_index") is not None:
-        slot_idx = entities.get("slot_index")
-        if not slot_idx:
-            try:
-                slot_idx = int(user_message.strip())
-            except ValueError:
-                return "Please choose a valid option (1, 2, or 3) from the slots list, or click one of the buttons."
+    # Try parsing slot_idx from entities or user message
+    slot_idx = entities.get("slot_index")
+    
+    if not slot_idx and user_state.slots_json:
+        try:
+            slots = json.loads(user_state.slots_json)
+            matched_idx = None
+            msg_clean = user_message.lower().replace(" ", "").replace(":", "")
+            
+            # 1. Check if it's a direct digit index
+            num_match = re.search(r'\b([1-3])\b', user_message)
+            if num_match:
+                matched_idx = int(num_match.group(1))
+            elif "slot_" in msg_clean:
+                s_num_match = re.search(r'slot_(\d+)', msg_clean)
+                if s_num_match:
+                    matched_idx = int(s_num_match.group(1))
+                    
+            if not matched_idx:
+                # 2. Try exact day/time matching
+                for i, slot in enumerate(slots):
+                    start_dt = datetime.fromisoformat(slot["start"]).astimezone(IST)
+                    day_short = start_dt.strftime("%a").lower()      # e.g. "sat"
+                    day_full = start_dt.strftime("%A").lower()       # e.g. "saturday"
+                    time_hour = start_dt.strftime("%I").lstrip("0")  # e.g. "4"
+                    time_hour_val = str(start_dt.hour)               # e.g. "16"
+                    time_min = start_dt.strftime("%M")               # e.g. "00"
+                    am_pm = start_dt.strftime("%p").lower()          # e.g. "pm"
+                    
+                    patterns = [
+                        f"{day_short}{time_hour}",
+                        f"{day_short}{time_hour}{am_pm}",
+                        f"{day_full}{time_hour}",
+                        f"{day_full}{time_hour}{am_pm}",
+                        f"{day_short}{time_hour_val}",
+                        f"{day_full}{time_hour_val}"
+                    ]
+                    
+                    if any(pat in msg_clean for pat in patterns):
+                        matched_idx = i + 1
+                        break
+                        
+            if not matched_idx:
+                # 3. Check if both the day and hour match as substrings (e.g. "sat 4")
+                for i, slot in enumerate(slots):
+                    start_dt = datetime.fromisoformat(slot["start"]).astimezone(IST)
+                    day_short = start_dt.strftime("%a").lower()
+                    day_full = start_dt.strftime("%A").lower()
+                    time_hour = start_dt.strftime("%I").lstrip("0")
+                    time_hour_val = str(start_dt.hour)
+                    
+                    has_day = (day_short in msg_clean) or (day_full in msg_clean)
+                    has_time = (time_hour in msg_clean) or (time_hour_val in msg_clean)
+                    
+                    if has_day and has_time:
+                        matched_idx = i + 1
+                        break
+                        
+            if matched_idx and 1 <= matched_idx <= len(slots):
+                slot_idx = matched_idx
+        except Exception as e:
+            logger.error(f"Error parsing slot from message: {e}")
 
+    if slot_idx is not None:
         # Check Slot Expiration
         if user_state.slot_generated_at:
             generated_at = user_state.slot_generated_at.replace(tzinfo=IST) if not user_state.slot_generated_at.tzinfo else user_state.slot_generated_at
@@ -407,11 +456,11 @@ async def handle_awaiting_slot(
         
         start_dt = datetime.fromisoformat(selected["start"]).astimezone(IST)
         day_str = start_dt.strftime("%A, %b %d")
-        time_str = start_dt.strftime("%I:%M %p")
+        time_str = start_dt.strftime("%I:%M %p").lstrip("0")
         
-        body_text = f"You selected Maruti Suzuki {user_state.selected_car_model} ({user_state.selected_car_variant}) on {day_str} at {time_str}.\n\nReply with 'Confirm' to book your test drive."
+        body_text = f"You selected {user_state.selected_car_model} ({user_state.selected_car_variant}) on {day_str} at {time_str}.\n\nReply with 'Confirm' to book your test drive."
         
-        send_whatsapp_buttons(
+        sent = send_whatsapp_buttons(
             to=user_state.phone_number,
             header="Confirm Booking",
             body=body_text,
@@ -420,8 +469,13 @@ async def handle_awaiting_slot(
                 ("confirm_booking_no", "Cancel")
             ]
         )
-        return ""
+        if sent:
+            return ""
+        return body_text
 
+    elif intent == "INTENT_SELECT_SLOT":
+        return "Please choose a valid option (1, 2, or 3) from the slots list, or click one of the buttons."
+        
     elif intent == "INTENT_BOOK_REQUEST":
         return await handle_booking_init(session, user_state, entities, now_naive)
         
@@ -514,10 +568,10 @@ async def handle_awaiting_confirmation(
             user_state.selected_slot_end = None
             
             day_str = start_dt.strftime("%A")
-            time_str = start_dt.strftime("%I:%M %p")
+            time_str = start_dt.strftime("%I:%M %p").lstrip("0")
             
             return (
-                f"Done ✅ Test drive booked - {new_booking.car_model} {new_booking.car_variant}, "
+                f"Done ✅ Test drive booked – {new_booking.car_model} {new_booking.car_variant}, "
                 f"{day_str} {time_str}.\n"
                 f"I'll remind you a day before and 2 hours before. See you then!"
             )
@@ -544,9 +598,9 @@ async def handle_awaiting_confirmation(
     else:
         start_dt = user_state.selected_slot_start.replace(tzinfo=IST)
         day_str = start_dt.strftime("%A, %b %d")
-        time_str = start_dt.strftime("%I:%M %p")
+        time_str = start_dt.strftime("%I:%M %p").lstrip("0")
         return (
-            f"You have a pending booking request for Maruti Suzuki {user_state.selected_car_model} ({user_state.selected_car_variant}) on {day_str} at {time_str}.\n\n"
+            f"You have a pending booking request for {user_state.selected_car_model} ({user_state.selected_car_variant}) on {day_str} at {time_str}.\n\n"
             f"Please reply with 'Confirm' to finalize the booking, or 'Cancel'."
         )
 
@@ -603,7 +657,7 @@ async def start_qualification_or_suggest_slots(
         user_state.state = STATE_QUALIFYING_BUDGET
         return (
             f"Awesome choice! Before we select a slot for your test drive of the "
-            f"Maruti Suzuki {user_state.selected_car_model} ({user_state.selected_car_variant}), "
+            f"{user_state.selected_car_model} ({user_state.selected_car_variant}), "
             f"could you tell us what your approximate budget is?"
         )
     elif not user_state.lead_timeline:
@@ -694,18 +748,33 @@ async def suggest_and_transition_slots(
     for i, slot in enumerate(slots_data[:3]):
         start_dt = datetime.fromisoformat(slot["start"]).astimezone(IST)
         day_str = start_dt.strftime("%a")
-        time_str = start_dt.strftime("%I:%M %p")
+        time_str = start_dt.strftime("%I:%M %p").lstrip("0")
         buttons.append((f"slot_{i+1}", f"{day_str} {time_str}"))
 
-    body_text = f"Sure! Here are open slots for your test drive of Maruti Suzuki {user_state.selected_car_model} ({user_state.selected_car_variant}):\n\nWhich works?"
-    send_whatsapp_buttons(
+    # Determine day description
+    is_weekend = False
+    if date_preference:
+        pref = date_preference.lower()
+        if "weekend" in pref or "sat" in pref or "sun" in pref:
+            is_weekend = True
+    else:
+        for slot in slots_data:
+            start_dt = datetime.fromisoformat(slot["start"]).astimezone(IST)
+            if start_dt.weekday() in [5, 6]:
+                is_weekend = True
+                break
+    day_desc = "this weekend" if is_weekend else "tomorrow"
+
+    body_text = f"Sure! Here are open slots {day_desc}:\n{slots_list_msg}\nWhich works?"
+    sent = send_whatsapp_buttons(
         to=user_state.phone_number,
         header="Select Test Drive Slot",
         body=body_text,
         buttons=buttons
     )
-    
-    return ""
+    if sent:
+        return ""
+    return body_text
 
 async def regenerate_slots_and_reply(
     user_state: UserConversationState,
@@ -726,28 +795,32 @@ async def regenerate_slots_and_reply(
     user_state.slot_generated_at = now_naive
     user_state.state = STATE_AWAITING_SLOT
 
+    slots_list_msg = format_slots_message(slots_data)
+
     buttons = []
     for i, slot in enumerate(slots_data):
         start_dt = datetime.fromisoformat(slot["start"]).astimezone(IST)
         day_str = start_dt.strftime("%a")
-        time_str = start_dt.strftime("%I:%M %p")
+        time_str = start_dt.strftime("%I:%M %p").lstrip("0")
         buttons.append((f"slot_{i+1}", f"{day_str} {time_str}"))
 
-    body_text = f"{reply_header} Let's try these fresh available slots instead:\n\nWhich works?"
-    send_whatsapp_buttons(
+    body_text = f"{reply_header} Let's try these fresh available slots instead:\n{slots_list_msg}\nWhich works?"
+    sent = send_whatsapp_buttons(
         to=user_state.phone_number,
         header="Select Slot",
         body=body_text,
         buttons=buttons
     )
-    return ""
+    if sent:
+        return ""
+    return body_text
 
 def format_slots_message(slots_data: list[dict]) -> str:
     """Formats slot selections as a bullet list."""
     lines = []
     for i, slot in enumerate(slots_data):
         start_dt = datetime.fromisoformat(slot["start"]).astimezone(IST)
-        day_str = start_dt.strftime("%A, %b %d")
-        time_str = start_dt.strftime("%I:%M %p")
-        lines.append(f"{i+1}) {day_str} at {time_str}")
-    return "\n".join(lines)
+        day_str = start_dt.strftime("%a")
+        time_str = start_dt.strftime("%I:%M %p").lstrip("0")
+        lines.append(f"{i+1}) {day_str} {time_str}")
+    return "  ".join(lines)
