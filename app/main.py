@@ -55,7 +55,7 @@ def health_check():
     return {
         "status": "healthy",
         "app": "CarBOLO WhatsApp Agent",
-        "version": "1.0.0"
+        "version": "1.0.3-debug-routing"
     }
 
 if __name__ == "__main__":
