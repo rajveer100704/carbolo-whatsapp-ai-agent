@@ -47,7 +47,7 @@ def retrieve_context(user_message: str) -> str:
     norm_text = normalize_variant(text)
 
     # ------------------------------------------------------------------
-    # 1. Identify the model being discussed
+    # 1. Identify the model being discussed (alias-first, then KB word scan)
     # ------------------------------------------------------------------
     matched_model_name: str | None = None
     for alias, canonical in MODEL_ALIASES.items():
@@ -56,18 +56,33 @@ def retrieve_context(user_message: str) -> str:
             break
 
     # ------------------------------------------------------------------
-    # 2. Identify the variant being discussed (only if model is known)
+    # 2. Identify the variant being discussed
+    #    If model is known  → scope variant search to that model only.
+    #    If model is UNKNOWN → scan all models globally so queries like
+    #    "ZXi+ me sunroof hai?" resolve without an explicit model name.
     # ------------------------------------------------------------------
     matched_variant_name: str | None = None
+
     if matched_model_name:
+        # Scoped scan
         model_obj = KnowledgeBase.get_model_details(matched_model_name)
         if model_obj:
             for var in model_obj.get("variants", []):
                 norm_var = normalize_variant(var["name"])
-                # Accept: exact normalized match, or one is contained in the other
                 if norm_var == norm_text or norm_var in norm_text or norm_text in norm_var:
                     matched_variant_name = var["name"]
                     break
+    else:
+        # Global variant scan — infers model from variant name
+        for model in kb.get("models", []):
+            for var in model.get("variants", []):
+                norm_var = normalize_variant(var["name"])
+                if norm_var == norm_text or norm_var in norm_text or norm_text in norm_var:
+                    matched_model_name  = model["name"]
+                    matched_variant_name = var["name"]
+                    break
+            if matched_model_name:
+                break
 
     # ------------------------------------------------------------------
     # 3. Build context

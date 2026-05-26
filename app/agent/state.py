@@ -250,68 +250,96 @@ async def handle_car_selected(
     now_naive: datetime
 ) -> str:
     logger.info(
-        f"[FSM_DEBUG] intent={intent} | "
-        f"entities={entities} | "
-        f"user_message={user_message}"
+        "[FSM_DEBUG] state=STATE_CAR_SELECTED | intent=%s | "
+        "selected_model=%s | selected_variant=%s | message='%s'",
+        intent, user_state.selected_car_model,
+        user_state.selected_car_variant, user_message,
     )
-    if not user_state.selected_car_variant:
-        variant = entities.get("car_variant")
-        if variant in [None, "", "null"]:
-            from app.agent.intent import extract_variant_for_model
-            extracted_variant = extract_variant_for_model(
-                user_state.selected_car_model,
-                user_message
-            )
-            logger.info(
-                f"[FSM] Variant extraction | "
-                f"model={user_state.selected_car_model} | "
-                f"user_message={user_message} | "
-                f"extracted_variant={extracted_variant}"
-            )
-            variant = extracted_variant
-        
-        if variant and variant not in ["", "null"]:
-            # Validate variant is in knowledgebase for this model
-            from app.rag.kb_loader import KnowledgeBase
-            kb_variant = KnowledgeBase.get_variant_details(user_state.selected_car_model, variant)
-            if kb_variant:
-                user_state.selected_car_variant = kb_variant["name"]
-                return await start_qualification_or_suggest_slots(user_state, now, now_naive, entities.get("date_preference"))
-            else:
-                variants_list = "VXi or ZXi+"
-                if "swift" in user_state.selected_car_model.lower():
-                    variants_list = "LXi or ZXi+"
-                return f"Sorry, we do not offer the variant '{variant}' for the {user_state.selected_car_model}. We offer {variants_list}."
-        
-        # Q&A interception: only treat as a spec question when the message is clearly
-        # a question (≥3 words) — prevents bare variant names like "VXi" from falling
-        # into the RAG path instead of being treated as variant selection.
-        is_clear_spec_q = (
-            intent == "INTENT_QA"
-            and is_spec_query(user_message)
-            and len(user_message.split()) > 2
+
+    # ── Variant already confirmed → go straight to qualification / slots ──
+    if user_state.selected_car_variant:
+        return await start_qualification_or_suggest_slots(
+            user_state, now, now_naive, entities.get("date_preference")
         )
-        if is_clear_spec_q:
-            context = retrieve_context(user_message)
-            answer = await generate_grounded_response(user_message, context)
-            variants_list = "VXi or ZXi+"
-            if "swift" in user_state.selected_car_model.lower():
-                variants_list = "LXi or ZXi+"
+
+    # ── Variant NOT yet set: try to extract it ────────────────────────────
+    #
+    # Priority order (most-specific first):
+    #   1. Model-scoped extraction from the raw message text
+    #      (avoids VXi ambiguity between Brezza / Ertiga)
+    #   2. Entity already parsed by the NLU layer (fallback)
+    #
+    # This block MUST run before any spec-query / intent check so that
+    # bare variant names ("VXi", "ZXi+") are never misrouted to the RAG
+    # path.
+    from app.agent.intent import extract_variant_for_model
+    from app.rag.kb_loader import KnowledgeBase
+
+    # 1. Model-scoped extraction — most reliable
+    variant = extract_variant_for_model(user_state.selected_car_model, user_message)
+    logger.info(
+        "[FSM] extract_variant_for_model('%s', '%s') → %s",
+        user_state.selected_car_model, user_message, variant,
+    )
+
+    # 2. Fall back to NLU entity if model-scoped scan found nothing
+    if not variant:
+        entity_variant = entities.get("car_variant")
+        if entity_variant and entity_variant not in ("", "null"):
+            variant = entity_variant
+            logger.info("[FSM] Using NLU entity variant: %s", variant)
+
+    # ── Validate and commit the variant ───────────────────────────────────
+    if variant:
+        kb_variant = KnowledgeBase.get_variant_details(
+            user_state.selected_car_model, variant
+        )
+        if kb_variant:
+            user_state.selected_car_variant = kb_variant["name"]  # canonical casing
+            logger.info(
+                "[FSM] Variant confirmed: %s → entering qualification",
+                kb_variant["name"],
+            )
+            return await start_qualification_or_suggest_slots(
+                user_state, now, now_naive, entities.get("date_preference")
+            )
+        else:
+            # Variant mentioned but not in KB for this model
+            variants_list = "LXi or ZXi+" if "swift" in user_state.selected_car_model.lower() else "VXi or ZXi+"
+            logger.warning(
+                "[FSM] Unknown variant '%s' for %s", variant, user_state.selected_car_model
+            )
             return (
-                f"{answer}\n\n"
-                f"To continue, which variant of the {user_state.selected_car_model} "
-                f"would you like to drive? We offer {variants_list}."
+                f"Sorry, we don't offer the '{variant}' variant for the "
+                f"{user_state.selected_car_model}. "
+                f"Available variants: {variants_list}. Which would you like to try?"
             )
 
-        variants_list = "VXi or ZXi+"
-        if "swift" in user_state.selected_car_model.lower():
-            variants_list = "LXi or ZXi+"
+    # ── No variant found in message ───────────────────────────────────────
+    #
+    # Only reach here when the message contains ZERO variant signal.
+    # Answer spec questions mid-flow (≥3 words to avoid bare-word false matches),
+    # then re-prompt for the variant.
+    variants_list = "LXi or ZXi+" if "swift" in user_state.selected_car_model.lower() else "VXi or ZXi+"
+
+    is_clear_spec_q = (
+        intent == "INTENT_QA"
+        and is_spec_query(user_message)
+        and len(user_message.split()) > 2
+    )
+    if is_clear_spec_q:
+        context = retrieve_context(user_message)
+        answer  = await generate_grounded_response(user_message, context)
         return (
+            f"{answer}\n\n"
             f"To continue, which variant of the {user_state.selected_car_model} "
             f"would you like to drive? We offer {variants_list}."
         )
-    else:
-        return await start_qualification_or_suggest_slots(user_state, now, now_naive, entities.get("date_preference"))
+
+    return (
+        f"To continue, which variant of the {user_state.selected_car_model} "
+        f"would you like to drive? We offer {variants_list}."
+    )
 
 async def handle_qualifying_budget(
     session: AsyncSession,

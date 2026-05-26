@@ -422,39 +422,51 @@ Example:
 
 def _extract_field_from_context(context: str, field_key: str) -> str | None:
     """
-    Extracts the value of a context field line.
-    E.g. field_key="Mileage" matches "Mileage: 19.8 kmpl" → "19.8 kmpl"
+    Extracts the value(s) of a context field by simple line scanning.
+
+    Uses strip + startswith instead of regex so it is immune to:
+      - leading/trailing whitespace or indentation
+      - special chars in field names (e.g. "Price (ex-showroom)" has parentheses)
+      - CRLF vs LF line endings
+      - re.MULTILINE anchor edge-cases
+
+    Returns comma-joined unique values across matching lines
+    (e.g. two variants with the same mileage are de-duplicated).
     """
-    pattern = re.compile(rf"^{re.escape(field_key)}:\s*(.+)$", re.MULTILINE | re.IGNORECASE)
-    matches = pattern.findall(context)
-    if matches:
-        # Return comma-joined unique values (e.g. multiple variants' mileage)
-        seen, out = set(), []
-        for m in matches:
-            m = m.strip()
-            if m not in seen:
-                seen.add(m)
-                out.append(m)
-        return ", ".join(out)
-    return None
+    prefix = field_key.lower() + ":"
+    seen: set[str] = set()
+    out:  list[str] = []
+
+    for raw_line in context.splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        if line.lower().startswith(prefix):
+            value = line.split(":", 1)[1].strip()
+            if value and value not in seen:
+                seen.add(value)
+                out.append(value)
+
+    return ", ".join(out) if out else None
 
 
 def _build_specs_block(context: str, max_lines: int = 20) -> str | None:
     """
     Collects all spec lines from context and returns a formatted block,
     or None if no useful lines found.
+
+    Uses splitlines() (handles both LF and CRLF) and strip() on each line
+    for whitespace-agnostic matching.
     """
     spec_keys = {"engine", "mileage", "transmission", "features",
                  "sunroof", "price", "colors", "variant", "model"}
-    lines = context.split("\n")
     block: list[str] = []
 
-    for line in lines:
-        stripped = line.strip()
+    for raw_line in context.splitlines():
+        stripped = raw_line.strip()
         if not stripped:
             continue
-        stripped_lower = stripped.lower()
-        if any(stripped_lower.startswith(k) for k in spec_keys):
+        if any(stripped.lower().startswith(k) for k in spec_keys):
             block.append(stripped)
         if len(block) >= max_lines:
             break
