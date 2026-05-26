@@ -283,18 +283,33 @@ async def handle_car_selected(
                     variants_list = "LXi or ZXi+"
                 return f"Sorry, we do not offer the variant '{variant}' for the {user_state.selected_car_model}. We offer {variants_list}."
         
-        if intent == "INTENT_QA" and is_spec_query(user_message):
+        # Q&A interception: only treat as a spec question when the message is clearly
+        # a question (≥3 words) — prevents bare variant names like "VXi" from falling
+        # into the RAG path instead of being treated as variant selection.
+        is_clear_spec_q = (
+            intent == "INTENT_QA"
+            and is_spec_query(user_message)
+            and len(user_message.split()) > 2
+        )
+        if is_clear_spec_q:
             context = retrieve_context(user_message)
             answer = await generate_grounded_response(user_message, context)
             variants_list = "VXi or ZXi+"
             if "swift" in user_state.selected_car_model.lower():
                 variants_list = "LXi or ZXi+"
-            return f"{answer}\n\nTo continue, which variant of the {user_state.selected_car_model} would you like to drive? We offer {variants_list}."
-            
+            return (
+                f"{answer}\n\n"
+                f"To continue, which variant of the {user_state.selected_car_model} "
+                f"would you like to drive? We offer {variants_list}."
+            )
+
         variants_list = "VXi or ZXi+"
         if "swift" in user_state.selected_car_model.lower():
             variants_list = "LXi or ZXi+"
-        return f"To continue, which variant of the {user_state.selected_car_model} would you like to drive? We offer {variants_list}."
+        return (
+            f"To continue, which variant of the {user_state.selected_car_model} "
+            f"would you like to drive? We offer {variants_list}."
+        )
     else:
         return await start_qualification_or_suggest_slots(user_state, now, now_naive, entities.get("date_preference"))
 
@@ -633,27 +648,37 @@ async def handle_booking_init(
         return "Which Maruti Suzuki car are you interested in booking a test drive for? (We have the Brezza, Swift, and Ertiga)."
         
     user_state.selected_car_model = model
-    
+
     if not variant:
+        # No variant in this message — ask for it
         variants_list = "VXi or ZXi+"
         if "swift" in model.lower():
             variants_list = "LXi or ZXi+"
-            
         user_state.state = STATE_CAR_SELECTED
         return f"Which variant of the {model} would you like to drive? We offer {variants_list}."
 
-    # Validate variant is in knowledgebase for this model
+    # Validate variant against KB
     from app.rag.kb_loader import KnowledgeBase
     kb_variant = KnowledgeBase.get_variant_details(model, variant)
     if not kb_variant:
+        # Unknown variant — stay idle and inform
         user_state.state = STATE_IDLE
-        return f"Sorry, we do not offer the variant '{variant}' for the {model}. Please choose a valid variant."
+        variants_list = "VXi or ZXi+"
+        if "swift" in model.lower():
+            variants_list = "LXi or ZXi+"
+        return (
+            f"Sorry, we don't offer the '{variant}' variant for the {model}. "
+            f"Available variants: {variants_list}. Which would you like to try?"
+        )
 
-    user_state.selected_car_variant = variant
+    # Both model AND variant are confirmed — skip variant-selection step
+    user_state.selected_car_variant = kb_variant["name"]  # use canonical name from KB
     user_state.state = STATE_CAR_SELECTED
-    
+
     now_ist = get_ist_now()
-    return await start_qualification_or_suggest_slots(user_state, now_ist, now_naive, entities.get("date_preference"))
+    return await start_qualification_or_suggest_slots(
+        user_state, now_ist, now_naive, entities.get("date_preference")
+    )
 
 async def start_qualification_or_suggest_slots(
     user_state: UserConversationState,
