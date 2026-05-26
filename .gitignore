@@ -24,6 +24,10 @@ env/
 # Testing
 .pytest_cache/
 
+# Local zips and scratch scripts
+*.zip
+scratch/
+
 # Credentials
 service_account.json
 credentials.json
