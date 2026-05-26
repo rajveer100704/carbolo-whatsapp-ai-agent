@@ -66,13 +66,29 @@ _OUTSIDE_KB_CARS = frozenset([
 def is_spec_query(text: str) -> bool:
     """Returns True if the message is asking about car specifications."""
     text_lower = text.lower()
+    # Use word tokenization to avoid substring matches on short words (like "ac")
+    words = set(re.findall(r"\b\w+\b", text_lower))
+    
     spec_keywords = {
-        "sunroof", "price", "cost", "mileage", "average", "color", "colour",
-        "features", "variant", "engine", "transmission", "gear", "bags", "airbag",
+        "sunroof", "price", "cost", "mileage", "average", "color", "colour", "colors", "colours",
+        "features", "variant", "engine", "transmission", "gear", "bags", "airbag", "airbags",
         "infotainment", "camera", "charger", "display", "abs", "ebd", "bluetooth",
-        "alloy", "screen", "torque", "power", "bhp", "spec", "specs", "specification",
+        "alloy", "screen", "torque", "power", "bhp", "spec", "specs", "specification", "specifications",
+        "ac", "vent", "vents", "climate", "control", "button", "start", "stop", "push", "audio", "system",
+        "headlamps", "headlamp", "halogen", "led", "projector", "stability", "wheel", "wheels",
+        "ex-showroom", "rate", "range", "rang", "daam", "detail", "details", "information", "info",
+        "available", "option", "options", "accessories", "accessory", "adas", "ventilated", "cruise",
+        "awd", "4wd", "panoramic"
     }
-    return any(w in text_lower for w in spec_keywords) or "?" in text_lower
+    
+    # Also check multi-word spec phrases as substrings
+    spec_phrases = ["rear ac", "rear view", "ex showroom", "climate control", "start stop", "heads up"]
+    
+    return (
+        any(w in words for w in spec_keywords)
+        or any(p in text_lower for p in spec_phrases)
+        or "?" in text_lower
+    )
 
 
 def configure_gemini() -> bool:
@@ -403,6 +419,10 @@ Example:
                 }
             ):
                 data["intent"] = INTENT_BOOK_REQUEST
+
+            # If heuristics detected INTENT_QA and it is a spec query, lock intent as INTENT_QA
+            if heuristics.get("intent") == INTENT_QA and is_spec_query(text):
+                data["intent"] = INTENT_QA
 
             logger.info(
                 "parse_intent_with_llm: intent=%s entities=%s",

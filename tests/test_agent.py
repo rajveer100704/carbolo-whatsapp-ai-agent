@@ -853,3 +853,23 @@ async def test_features_mock_grounded_response():
     assert "Price (ex-showroom): ₹9.7L" in reply
 
 
+@pytest.mark.asyncio
+async def test_spec_query_intent_classification():
+    """Verifies that queries asking about specific parts/features classify as INTENT_QA."""
+    from app.agent.intent import is_spec_query, parse_intent_heuristics
+    
+    # 1. Test is_spec_query keywords
+    assert is_spec_query("does Ertiga have rear AC vents") is True
+    assert is_spec_query("does Brezza have automatic climate control") is True
+    assert is_spec_query("Does it have headlamps?") is True
+    assert is_spec_query("Tell me about the touchscreen system") is True
+    assert is_spec_query("I want to check my active booking") is False
+    assert is_spec_query("Welcome back") is False
+    
+    # 2. Test intent classification with heuristics
+    res = parse_intent_heuristics("does Ertiga have rear AC vents", "STATE_IDLE")
+    assert res["intent"] == "INTENT_QA"
+    assert res["entities"]["car_model"] == "Maruti Ertiga"
+
+
+
