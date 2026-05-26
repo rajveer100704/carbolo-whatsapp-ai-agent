@@ -14,6 +14,10 @@ This document summarizes the changes, test executions, and live verification res
 * **Stricter Grounding Guardrails**:
   * Integrated a post-processing interceptor in [app/agent/intent.py](file:///c:/Users/BIT/CarBOLO/app/agent/intent.py) to immediately swap any hallucinated replies with the standard refusal message: `"I don't have that information in the dealership knowledge base."`
   * Added keyword checks for ungrounded features (e.g., ADAS, ventilated seats, CNG, diesel, AWD, panoramic sunroof) and external car brands (e.g., Baleno, Vitara, Creta, Nexon).
+* **Spec / Q&A Intent Routing Resolution**:
+  * Expanded the list of spec/feature keywords in `is_spec_query` inside [intent.py](file:///c:/Users/BIT/CarBOLO/app/agent/intent.py) to cover rear AC vents, climate control, headlamps, and other components in the KB. Switched to regex word boundaries to avoid false substring matches on words like `"active"` or `"back"`.
+  * Added an override rule in `parse_intent_with_llm` to protect `INTENT_QA` and lock it as such if heuristics classify the query as a spec query, preventing the Gemini LLM from incorrectly classifying spec queries as `INTENT_BOOK_REQUEST`.
+  * Added corresponding unit tests in [test_agent.py](file:///c:/Users/BIT/CarBOLO/tests/test_agent.py).
 * **Gemini Model Upgrade**:
   * Upgraded the default Generative Model to **`gemini-2.5-flash`** to ensure full compatibility with the user API project limits.
 * **FastAPI Entry Point Correction**:
