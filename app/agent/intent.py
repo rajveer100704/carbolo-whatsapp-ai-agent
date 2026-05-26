@@ -288,6 +288,21 @@ def parse_intent_heuristics(text: str, current_state: str) -> dict:
     if any(kw in text_lower for kw in reschedule_kw):
         return {"intent": INTENT_RESCHEDULE, "entities": entities}
 
+    # ── Active booking flow continuation ─────────────────────────────────
+    # If user is already selecting a car variant and sends short variant text
+    # like "VXi" or "ZXi+", DO NOT restart booking intent.
+    if current_state == "STATE_CAR_SELECTED":
+        short_msg = text_lower.strip()
+        norm_short = normalize_variant(short_msg)
+        if norm_short in {"vxi", "zxi", "zxiplus", "lxi", "vxiplus"}:
+            model, variant = extract_car_from_text(short_msg)
+            entities["car_model"] = model
+            entities["car_variant"] = variant or short_msg.upper()
+            return {
+                "intent": INTENT_QA,
+                "entities": entities
+            }
+
     # ── 5. Booking request ───────────────────────────────────────────────
     # Explicit booking keywords (including Hinglish: "book karna", "chalana", "chahiye")
     booking_kw = {
@@ -478,15 +493,24 @@ def _build_specs_block(context: str, max_lines: int = 20) -> str | None:
     Uses splitlines() (handles both LF and CRLF) and strip() on each line
     for whitespace-agnostic matching.
     """
-    spec_keys = {"engine", "mileage", "transmission", "features",
-                 "sunroof", "price", "colors", "variant", "model"}
     block: list[str] = []
 
     for raw_line in context.splitlines():
         stripped = raw_line.strip()
         if not stripped:
             continue
-        if any(stripped.lower().startswith(k) for k in spec_keys):
+        lowered = stripped.lower()
+        if (
+            lowered.startswith("model:")
+            or lowered.startswith("variant:")
+            or lowered.startswith("engine:")
+            or lowered.startswith("mileage:")
+            or lowered.startswith("transmission:")
+            or lowered.startswith("features:")
+            or lowered.startswith("sunroof:")
+            or lowered.startswith("price")
+            or lowered.startswith("colors:")
+        ):
             block.append(stripped)
         if len(block) >= max_lines:
             break
