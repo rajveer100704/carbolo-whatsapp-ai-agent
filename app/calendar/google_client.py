@@ -26,12 +26,22 @@ class GoogleCalendarClient:
             return cls._service, cls._is_mock
 
         try:
-            # Parse service account JSON (it can be a filepath or a JSON string)
+            # Parse service account JSON (it can be a filepath, base64 string, or raw JSON string)
             if os.path.exists(service_account_json_str):
                 with open(service_account_json_str, "r") as f:
                     info = json.load(f)
             else:
-                info = json.loads(service_account_json_str)
+                # Try base64 decoding if the string doesn't start with standard JSON braces
+                raw_str = service_account_json_str.strip()
+                if not raw_str.startswith("{"):
+                    try:
+                        import base64
+                        decoded = base64.b64decode(raw_str).decode("utf-8")
+                        if decoded.strip().startswith("{"):
+                            raw_str = decoded.strip()
+                    except Exception:
+                        pass
+                info = json.loads(raw_str)
 
             scopes = ["https://www.googleapis.com/auth/calendar"]
             creds = service_account.Credentials.from_service_account_info(info, scopes=scopes)
