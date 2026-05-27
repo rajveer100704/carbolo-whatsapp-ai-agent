@@ -1,0 +1,80 @@
+{
+  "oem": "Maruti Suzuki",
+  "models": [
+    {
+      "name": "Maruti Brezza",
+      "variants": [
+        {
+          "name": "VXi",
+          "engine": "1.5L petrol, 103 bhp",
+          "mileage": "19.8 kmpl (claimed)",
+          "transmission": "5-speed manual",
+          "features": ["6 airbags", "rear AC vents", "touchscreen infotainment"],
+          "sunroof": false,
+          "price": "₹9.7L",
+          "colors": ["White", "Grey", "Blue"]
+        },
+        {
+          "name": "ZXi+",
+          "engine": "1.5L petrol, 103 bhp",
+          "mileage": "19.8 kmpl (claimed)",
+          "transmission": "5-speed manual / 6-speed automatic",
+          "features": ["6 airbags", "rear AC vents", "9-inch touchscreen infotainment", "360-degree camera", "wireless charger", "heads-up display"],
+          "sunroof": true,
+          "price": "₹12.4L",
+          "colors": ["White", "Grey", "Blue", "Red with Black Roof"]
+        }
+      ]
+    },
+    {
+      "name": "Maruti Swift",
+      "variants": [
+        {
+          "name": "LXi",
+          "engine": "1.2L Z-Series petrol, 80 bhp",
+          "mileage": "24.8 kmpl",
+          "transmission": "5-speed manual",
+          "features": ["6 airbags", "ABS with EBD", "electronic stability program", "halogen projector headlamps"],
+          "sunroof": false,
+          "price": "₹6.49L",
+          "colors": ["White", "Silver", "Red"]
+        },
+        {
+          "name": "ZXi+",
+          "engine": "1.2L Z-Series petrol, 80 bhp",
+          "mileage": "25.75 kmpl",
+          "transmission": "5-speed manual / 5-speed AMT",
+          "features": ["6 airbags", "9-inch touchscreen", "LED projector headlamps", "wireless charging", "rear view camera"],
+          "sunroof": false,
+          "price": "₹9.64L",
+          "colors": ["White", "Silver", "Red", "Blue", "Luster Blue with Black Roof"]
+        }
+      ]
+    },
+    {
+      "name": "Maruti Ertiga",
+      "variants": [
+        {
+          "name": "VXi",
+          "engine": "1.5L petrol, 102 bhp",
+          "mileage": "20.51 kmpl",
+          "transmission": "5-speed manual / 6-speed automatic",
+          "features": ["Dual front airbags", "ABS with EBD", "rear AC vents", "audio system with Bluetooth"],
+          "sunroof": false,
+          "price": "₹9.83L",
+          "colors": ["White", "Silver", "Grey", "Blue"]
+        },
+        {
+          "name": "ZXi+",
+          "engine": "1.5L petrol, 102 bhp",
+          "mileage": "20.51 kmpl",
+          "transmission": "5-speed manual / 6-speed automatic",
+          "features": ["4 airbags", "rear parking camera", "7-inch touchscreen", "push start/stop button", "automatic climate control"],
+          "sunroof": false,
+          "price": "₹11.63L",
+          "colors": ["White", "Silver", "Grey", "Blue", "Brown"]
+        }
+      ]
+    }
+  ]
+}
