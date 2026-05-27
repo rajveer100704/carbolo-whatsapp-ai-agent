@@ -138,23 +138,32 @@ We have successfully implemented and verified the three stretch requirements req
 
 ---
 
-## 6. Automated Verification Results
+## 6. Production Deployment & base64 Service Account Fix
+
+To bypass string escaping and formatting issues on hosting platforms like Render (where multi-line environment variables or JSON structures often get corrupted or truncated):
+- **Base64 Decode Support**: Added support in [google_client.py](file:///c:/Users/BIT/CarBOLO/app/calendar/google_client.py) to automatically detect and decode a base64-encoded `GOOGLE_SERVICE_ACCOUNT_JSON` environment variable.
+- **How to Deploy**: Generate the base64 string of your service account credentials and set it as the `GOOGLE_SERVICE_ACCOUNT_JSON` variable on Render.
+
+---
+
+## 7. Automated Verification Results
 
 We wrote comprehensive tests in [test_agent.py](file:///c:/Users/BIT/CarBOLO/tests/test_agent.py) covering the new qualification states, Q&A interception, attempts looping, entity skipping, returning user greetings, rescheduling, and text-based slot parsing.
 
 Running the full pytest suite:
-```
+```text
 ============================= test session starts =============================
 platform win32 -- Python 3.14.0, pytest-9.0.2, pluggy-1.6.0
 rootdir: C:\Users\BIT\CarBOLO
 plugins: anyio-4.13.0, langsmith-0.7.22, asyncio-1.3.0, cov-7.0.0
 asyncio: mode=Mode.STRICT, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
-collected 17 items
+collected 20 items
 
-tests\test_agent.py .................                                    [100%]
+tests\test_agent.py ....................                                 [100%]
 
-============================= 17 passed in 7.48s ==============================
+============================= 20 passed in 7.63s ==============================
 ```
 
-All 17 tests passed successfully! The agent is highly robust, consistent, and ready for deployment.
+All 20 tests passed successfully! The agent is highly robust, consistent, and ready for deployment.
+
 
