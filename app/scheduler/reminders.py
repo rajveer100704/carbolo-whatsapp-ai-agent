@@ -6,7 +6,7 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.date import DateTrigger
 
 from app.db.models import Reminder, Booking
-from app.db.session import async_session_factory
+import app.db.session
 from app.whatsapp.sender import send_whatsapp_message
 
 logger = logging.getLogger(__name__)
@@ -73,7 +73,7 @@ class ReminderScheduler:
 async def load_and_schedule_pending_reminders():
     """Reads all PENDING reminders from SQLite and schedules them in APScheduler."""
     logger.info("Reloading pending reminders from SQLite...")
-    async with async_session_factory() as session:
+    async with app.db.session.async_session_factory() as session:
         query = select(Reminder).where(Reminder.status == "PENDING")
         result = await session.execute(query)
         reminders = result.scalars().all()
@@ -113,7 +113,7 @@ def execute_reminder_job(reminder_id: int):
 
 async def _run_reminder_logic(reminder_id: int):
     """Core reminder sending logic with retry handlers."""
-    async with async_session_factory() as session:
+    async with app.db.session.async_session_factory() as session:
         # Fetch reminder
         query = select(Reminder).where(Reminder.id == reminder_id)
         result = await session.execute(query)
@@ -149,8 +149,24 @@ async def _run_reminder_logic(reminder_id: int):
                 f"({time_str}). Get ready!"
             )
 
-        # Send WhatsApp message
-        success = send_whatsapp_message(booking.phone_number, msg)
+        # Send reminder via corresponding channel
+        if getattr(booking, "channel", "whatsapp") == "gmail":
+            from app.email.gmail_service import GmailService
+            gmail_service = GmailService()
+            email_addr = booking.phone_number.replace("gmail:", "") if booking.phone_number.startswith("gmail:") else booking.phone_number
+            try:
+                await gmail_service.send_email_reply(
+                    to_email=email_addr,
+                    subject=f"Reminder: Test Drive for {booking.car_model}",
+                    body=msg,
+                    in_reply_to=None
+                )
+                success = True
+            except Exception as ex:
+                logger.error(f"Failed to send email reminder: {ex}")
+                success = False
+        else:
+            success = send_whatsapp_message(booking.phone_number, msg)
         
         if success:
             reminder.status = "SENT"

@@ -63,9 +63,9 @@ def create_test_drive_event(
     
     event_summary = f"Test Drive - {car_model} {car_variant} - {customer_name}"
     event_description = (
-        f"Test drive booked via WhatsApp Agent.\n\n"
+        f"Test drive booked via AI Agent.\n\n"
         f"Customer Name: {customer_name}\n"
-        f"Phone Number: {phone_number}\n"
+        f"Contact: {phone_number}\n"
         f"Car: {car_model} {car_variant}\n"
         f"Status: Confirmed"
     )

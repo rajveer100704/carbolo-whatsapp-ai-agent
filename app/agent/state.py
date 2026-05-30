@@ -98,7 +98,8 @@ async def transition_state(
     intent: str,
     entities: dict,
     user_message: str,
-    customer_name: str
+    customer_name: str,
+    channel: str = "whatsapp"
 ) -> str:
     """
     The state transition engine. Updates user_state in the database
@@ -180,7 +181,7 @@ async def transition_state(
             user_state.updated_at = now_naive
             
             # Suggest slots for the same vehicle (lead is already qualified)
-            return await suggest_and_transition_slots(user_state, now, now_naive, entities.get("date_preference"))
+            return await suggest_and_transition_slots(user_state, now, now_naive, entities.get("date_preference"), channel=channel)
         else:
             return "I couldn't find an active booking to reschedule. Would you like to book a new test drive?"
 
@@ -197,7 +198,7 @@ async def transition_state(
 
     handler = handlers.get(state)
     if handler:
-        response = await handler(session, user_state, intent, entities, user_message, customer_name, now, now_naive)
+        response = await handler(session, user_state, intent, entities, user_message, customer_name, now, now_naive, channel)
         user_state.updated_at = now_naive
         return response
 
@@ -211,7 +212,8 @@ async def handle_idle(
     user_message: str,
     customer_name: str,
     now: datetime,
-    now_naive: datetime
+    now_naive: datetime,
+    channel: str = "whatsapp"
 ) -> str:
     if intent == "INTENT_GREETING":
         # Greet returning user by name from previous booking history
@@ -232,7 +234,7 @@ async def handle_idle(
         )
         
     elif intent == "INTENT_BOOK_REQUEST":
-        return await handle_booking_init(session, user_state, entities, now_naive)
+        return await handle_booking_init(session, user_state, entities, now_naive, channel=channel)
         
     else:
         # Q&A intent or anything else
@@ -247,7 +249,8 @@ async def handle_car_selected(
     user_message: str,
     customer_name: str,
     now: datetime,
-    now_naive: datetime
+    now_naive: datetime,
+    channel: str = "whatsapp"
 ) -> str:
     logger.info(
         "[FSM_DEBUG] state=STATE_CAR_SELECTED | intent=%s | "
@@ -259,7 +262,7 @@ async def handle_car_selected(
     # ── Variant already confirmed → go straight to qualification / slots ──
     if user_state.selected_car_variant:
         return await start_qualification_or_suggest_slots(
-            user_state, now, now_naive, entities.get("date_preference")
+            user_state, now, now_naive, entities.get("date_preference"), channel=channel
         )
 
     # ── Variant NOT yet set: try to extract it ────────────────────────────
@@ -301,7 +304,7 @@ async def handle_car_selected(
                 kb_variant["name"],
             )
             return await start_qualification_or_suggest_slots(
-                user_state, now, now_naive, entities.get("date_preference")
+                user_state, now, now_naive, entities.get("date_preference"), channel=channel
             )
         else:
             # Variant mentioned but not in KB for this model
@@ -349,7 +352,8 @@ async def handle_qualifying_budget(
     user_message: str,
     customer_name: str,
     now: datetime,
-    now_naive: datetime
+    now_naive: datetime,
+    channel: str = "whatsapp"
 ) -> str:
     # Check loop protection
     loop_msg = check_qualification_loop(user_state)
@@ -364,7 +368,7 @@ async def handle_qualifying_budget(
 
     # Accept the answer
     user_state.lead_budget = user_message
-    return await proceed_qualification(user_state, now, now_naive, entities.get("date_preference"))
+    return await proceed_qualification(user_state, now, now_naive, entities.get("date_preference"), channel=channel)
 
 async def handle_qualifying_timeline(
     session: AsyncSession,
@@ -374,7 +378,8 @@ async def handle_qualifying_timeline(
     user_message: str,
     customer_name: str,
     now: datetime,
-    now_naive: datetime
+    now_naive: datetime,
+    channel: str = "whatsapp"
 ) -> str:
     # Check loop protection
     loop_msg = check_qualification_loop(user_state)
@@ -389,7 +394,7 @@ async def handle_qualifying_timeline(
 
     # Accept the answer
     user_state.lead_timeline = user_message
-    return await proceed_qualification(user_state, now, now_naive, entities.get("date_preference"))
+    return await proceed_qualification(user_state, now, now_naive, entities.get("date_preference"), channel=channel)
 
 async def handle_qualifying_fuel(
     session: AsyncSession,
@@ -399,7 +404,8 @@ async def handle_qualifying_fuel(
     user_message: str,
     customer_name: str,
     now: datetime,
-    now_naive: datetime
+    now_naive: datetime,
+    channel: str = "whatsapp"
 ) -> str:
     # Check loop protection
     loop_msg = check_qualification_loop(user_state)
@@ -414,7 +420,7 @@ async def handle_qualifying_fuel(
 
     # Accept the answer
     user_state.lead_fuel = user_message
-    return await proceed_qualification(user_state, now, now_naive, entities.get("date_preference"))
+    return await proceed_qualification(user_state, now, now_naive, entities.get("date_preference"), channel=channel)
 
 async def handle_awaiting_slot(
     session: AsyncSession,
@@ -424,7 +430,8 @@ async def handle_awaiting_slot(
     user_message: str,
     customer_name: str,
     now: datetime,
-    now_naive: datetime
+    now_naive: datetime,
+    channel: str = "whatsapp"
 ) -> str:
     # Try parsing slot_idx from entities or user message
     slot_idx = entities.get("slot_index")
@@ -496,7 +503,7 @@ async def handle_awaiting_slot(
             if now - generated_at > timedelta(minutes=SLOT_EXPIRATION_MINUTES):
                 logger.info(f"Slot hold expired for {user_state.phone_number}. Regenerating...")
                 reply_header = "These slots have expired."
-                return await regenerate_slots_and_reply(user_state, now, now_naive, reply_header)
+                return await regenerate_slots_and_reply(user_state, now, now_naive, reply_header, channel=channel)
 
         # Retrieve slots list
         if not user_state.slots_json:
@@ -517,32 +524,34 @@ async def handle_awaiting_slot(
         
         body_text = f"You selected {user_state.selected_car_model} ({user_state.selected_car_variant}) on {day_str} at {time_str}.\n\nReply with 'Confirm' to book your test drive."
         
-        sent = send_whatsapp_buttons(
-            to=user_state.phone_number,
-            header="Confirm Booking",
-            body=body_text,
-            buttons=[
-                ("confirm_booking_yes", "Confirm"),
-                ("confirm_booking_no", "Cancel")
-            ]
-        )
-        if sent:
-            return ""
+        if channel == "whatsapp":
+            sent = send_whatsapp_buttons(
+                to=user_state.phone_number,
+                header="Confirm Booking",
+                body=body_text,
+                buttons=[
+                    ("confirm_booking_yes", "Confirm"),
+                    ("confirm_booking_no", "Cancel")
+                ]
+            )
+            if sent:
+                return ""
         return body_text
 
     elif intent == "INTENT_SELECT_SLOT":
         return "Please choose a valid option (1, 2, or 3) from the slots list, or click one of the buttons."
         
     elif intent == "INTENT_BOOK_REQUEST":
-        return await handle_booking_init(session, user_state, entities, now_naive)
+        return await handle_booking_init(session, user_state, entities, now_naive, channel=channel)
         
     else:
-        slots_list_msg = format_slots_message(json.loads(user_state.slots_json))
+        slots_list_msg = format_slots_message(json.loads(user_state.slots_json), channel=channel)
+        instruction_msg = "\n\nPlease reply with the slot number (e.g. 1, 2, or 3) to choose." if channel == "gmail" else ""
         if is_spec_query(user_message):
             context = retrieve_context(user_message)
             answer = await generate_grounded_response(user_message, context)
-            return f"{answer}\n\nTo continue, please select a slot option:\n{slots_list_msg}"
-        return f"To continue, please select a slot option:\n{slots_list_msg}"
+            return f"{answer}\n\nTo continue, please select a slot option:\n{slots_list_msg}{instruction_msg}"
+        return f"To continue, please select a slot option:\n{slots_list_msg}{instruction_msg}"
 
 async def handle_awaiting_confirmation(
     session: AsyncSession,
@@ -552,7 +561,8 @@ async def handle_awaiting_confirmation(
     user_message: str,
     customer_name: str,
     now: datetime,
-    now_naive: datetime
+    now_naive: datetime,
+    channel: str = "whatsapp"
 ) -> str:
     if intent == "INTENT_CONFIRM":
         booking_query = select(Booking).where(
@@ -579,6 +589,7 @@ async def handle_awaiting_confirmation(
                 car_variant=user_state.selected_car_variant,
                 slot_start=user_state.selected_slot_start,
                 slot_end=user_state.selected_slot_end,
+                channel=channel,
                 status="COMPLETED",
                 created_at=now_naive
             )
@@ -665,7 +676,8 @@ async def handle_booking_init(
     session: AsyncSession,
     user_state: UserConversationState,
     entities: dict,
-    now_naive: datetime
+    now_naive: datetime,
+    channel: str = "whatsapp"
 ) -> str:
     """Initializes the booking state and extracts model/variant preference."""
     model = entities.get("car_model")
@@ -705,18 +717,19 @@ async def handle_booking_init(
 
     now_ist = get_ist_now()
     return await start_qualification_or_suggest_slots(
-        user_state, now_ist, now_naive, entities.get("date_preference")
+        user_state, now_ist, now_naive, entities.get("date_preference"), channel=channel
     )
 
 async def start_qualification_or_suggest_slots(
     user_state: UserConversationState,
     now_ist: datetime,
     now_naive: datetime,
-    date_preference: str = None
+    date_preference: str = None,
+    channel: str = "whatsapp"
 ) -> str:
     """Checks if lead qualification is completed. If not, initiates the qualifying flow. Otherwise, suggests slots."""
     if user_state.lead_completed:
-        return await suggest_and_transition_slots(user_state, now_ist, now_naive, date_preference)
+        return await suggest_and_transition_slots(user_state, now_ist, now_naive, date_preference, channel=channel)
         
     user_state.qualification_attempts = 0
 
@@ -741,13 +754,14 @@ async def start_qualification_or_suggest_slots(
         )
     else:
         user_state.lead_completed = True
-        return await suggest_and_transition_slots(user_state, now_ist, now_naive, date_preference)
+        return await suggest_and_transition_slots(user_state, now_ist, now_naive, date_preference, channel=channel)
 
 async def proceed_qualification(
     user_state: UserConversationState,
     now_ist: datetime,
     now_naive: datetime,
-    date_preference: str = None
+    date_preference: str = None,
+    channel: str = "whatsapp"
 ) -> str:
     """Transitions to the next missing qualification state or completes qualification and suggests slots."""
     user_state.qualification_attempts = 0
@@ -766,13 +780,14 @@ async def proceed_qualification(
         )
     else:
         user_state.lead_completed = True
-        return await suggest_and_transition_slots(user_state, now_ist, now_naive, date_preference)
+        return await suggest_and_transition_slots(user_state, now_ist, now_naive, date_preference, channel=channel)
 
 async def suggest_and_transition_slots(
     user_state: UserConversationState,
     now_ist: datetime,
     now_naive: datetime,
-    date_preference: str = None
+    date_preference: str = None,
+    channel: str = "whatsapp"
 ) -> str:
     """Generates slot suggestions, stores them in user state, and transitions state to STATE_AWAITING_SLOT."""
     target_date = now_ist.date() + timedelta(days=1)
@@ -809,7 +824,7 @@ async def suggest_and_transition_slots(
     user_state.slot_generated_at = now_naive
     user_state.state = STATE_AWAITING_SLOT
 
-    slots_list_msg = format_slots_message(slots_data)
+    slots_list_msg = format_slots_message(slots_data, channel=channel)
     
     buttons = []
     for i, slot in enumerate(slots_data[:3]):
@@ -832,22 +847,28 @@ async def suggest_and_transition_slots(
                 break
     day_desc = "this weekend" if is_weekend else "tomorrow"
 
-    body_text = f"Sure! Here are open slots {day_desc}:\n{slots_list_msg}\nWhich works?"
-    sent = send_whatsapp_buttons(
-        to=user_state.phone_number,
-        header="Select Test Drive Slot",
-        body=body_text,
-        buttons=buttons
-    )
-    if sent:
-        return ""
+    if channel == "gmail":
+        body_text = f"Sure! Here are open slots {day_desc}:\n{slots_list_msg}\n\nPlease reply with the slot number (e.g. 1, 2, or 3) to choose your time."
+    else:
+        body_text = f"Sure! Here are open slots {day_desc}:\n{slots_list_msg}\nWhich works?"
+
+    if channel == "whatsapp":
+        sent = send_whatsapp_buttons(
+            to=user_state.phone_number,
+            header="Select Test Drive Slot",
+            body=body_text,
+            buttons=buttons
+        )
+        if sent:
+            return ""
     return body_text
 
 async def regenerate_slots_and_reply(
     user_state: UserConversationState,
     now_ist: datetime,
     now_naive: datetime,
-    reply_header: str
+    reply_header: str,
+    channel: str = "whatsapp"
 ) -> str:
     """Regenerates slot list after expiration, saves to state, and sends them."""
     target_date = now_ist.date() + timedelta(days=1)
@@ -862,7 +883,7 @@ async def regenerate_slots_and_reply(
     user_state.slot_generated_at = now_naive
     user_state.state = STATE_AWAITING_SLOT
 
-    slots_list_msg = format_slots_message(slots_data)
+    slots_list_msg = format_slots_message(slots_data, channel=channel)
 
     buttons = []
     for i, slot in enumerate(slots_data):
@@ -871,23 +892,33 @@ async def regenerate_slots_and_reply(
         time_str = start_dt.strftime("%I:%M %p").lstrip("0")
         buttons.append((f"slot_{i+1}", f"{day_str} {time_str}"))
 
-    body_text = f"{reply_header} Let's try these fresh available slots instead:\n{slots_list_msg}\nWhich works?"
-    sent = send_whatsapp_buttons(
-        to=user_state.phone_number,
-        header="Select Slot",
-        body=body_text,
-        buttons=buttons
-    )
-    if sent:
-        return ""
+    if channel == "gmail":
+        body_text = f"{reply_header} Let's try these fresh available slots instead:\n{slots_list_msg}\n\nPlease reply with the slot number (e.g. 1, 2, or 3) to choose your time."
+    else:
+        body_text = f"{reply_header} Let's try these fresh available slots instead:\n{slots_list_msg}\nWhich works?"
+
+    if channel == "whatsapp":
+        sent = send_whatsapp_buttons(
+            to=user_state.phone_number,
+            header="Select Slot",
+            body=body_text,
+            buttons=buttons
+        )
+        if sent:
+            return ""
     return body_text
 
-def format_slots_message(slots_data: list[dict]) -> str:
+def format_slots_message(slots_data: list[dict], channel: str = "whatsapp") -> str:
     """Formats slot selections as a bullet list."""
     lines = []
     for i, slot in enumerate(slots_data):
         start_dt = datetime.fromisoformat(slot["start"]).astimezone(IST)
         day_str = start_dt.strftime("%a")
         time_str = start_dt.strftime("%I:%M %p").lstrip("0")
-        lines.append(f"{i+1}) {day_str} {time_str}")
+        if channel == "gmail":
+            lines.append(f"{i+1}. {day_str} {time_str}")
+        else:
+            lines.append(f"{i+1}) {day_str} {time_str}")
+    if channel == "gmail":
+        return "\n".join(lines)
     return "  ".join(lines)

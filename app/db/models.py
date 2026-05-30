@@ -38,6 +38,7 @@ class Booking(Base):
     slot_start = Column(DateTime, nullable=False)
     slot_end = Column(DateTime, nullable=False)
     calendar_event_id = Column(String, nullable=True)
+    channel = Column(String, default="whatsapp", nullable=False)
     status = Column(String, default="PENDING", nullable=False)  # PENDING, CONFIRMED, COMPLETED
     created_at = Column(DateTime, default=get_naive_ist)
     

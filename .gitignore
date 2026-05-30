@@ -33,3 +33,9 @@ scratch/
 service_account.json
 credentials.json
 client_secret*.json
+
+# Logs & temporary mock data
+app.log
+data/mock_inbox.json
+data/mock_outbox.json
+

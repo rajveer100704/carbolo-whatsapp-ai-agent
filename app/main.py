@@ -23,6 +23,7 @@ logger = logging.getLogger(__name__)
 from app.db.session import init_db
 from app.scheduler.reminders import ReminderScheduler, load_and_schedule_pending_reminders
 from app.whatsapp.webhook import router as webhook_router
+from app.email.email_worker import email_worker
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -36,9 +37,15 @@ async def lifespan(app: FastAPI):
     # Reload and schedule pending reminders to survive server restart
     await load_and_schedule_pending_reminders()
     
+    logger.info("Starting Gmail worker...")
+    await email_worker.start()
+    
     yield
     
     # Shutdown tasks
+    logger.info("Stopping Gmail worker...")
+    await email_worker.stop()
+    
     logger.info("Shutting down reminder scheduler...")
     ReminderScheduler.stop()
 
