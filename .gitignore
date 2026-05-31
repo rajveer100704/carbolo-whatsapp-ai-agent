@@ -9,6 +9,8 @@ __pycache__/
 *.db-journal
 data/*.db
 data/*.db-journal
+data/*.db-shm
+data/*.db-wal
 logs/
 
 # Environments

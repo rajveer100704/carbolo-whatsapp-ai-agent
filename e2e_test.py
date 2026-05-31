@@ -116,15 +116,15 @@ async def send_wa_message(client: httpx.AsyncClient, phone: str, text: str, msg_
     payload = make_wa_payload(phone, text, msg_id)
     try:
         r = await client.post(f"{BASE_URL}/webhook", json=payload, timeout=15)
-        log(INFO, f"  → WA sent '{text}' | webhook={r.status_code}")
+        log(INFO, f"  -> WA sent '{text}' | webhook={r.status_code}")
         return r.status_code == 200
     except Exception as e:
-        log(FAIL, f"  → WA send error: {e}")
+        log(FAIL, f"  -> WA send error: {e}")
         return False
 
 async def test_whatsapp_flow():
     log(INFO, "=== SECTION 3: WhatsApp Full Conversation Flow ===")
-    log(INFO, "  Testing: Brezza QA → Swift booking → slot confirm")
+    log(INFO, "  Testing: Brezza QA -> Swift booking -> slot confirm")
 
     # Use unique phone per test run to avoid FSM state carryover
     phone = f"9190{int(time.time()) % 10000000:07d}"
@@ -238,10 +238,10 @@ def send_test_email(subject: str, body: str) -> bool:
         server.login(GMAIL_USER, GMAIL_PASS)
         server.send_message(msg)
         server.quit()
-        log(INFO, f"  → Email sent: '{subject}'")
+        log(INFO, f"  -> Email sent: '{subject}'")
         return True
     except Exception as e:
-        log(FAIL, f"  → Email send failed: {e}")
+        log(FAIL, f"  -> Email send failed: {e}")
         return False
 
 async def test_email_flow():
@@ -278,11 +278,15 @@ async def test_email_flow():
 # ─────────────────────────────────────────────
 # SECTION 6: Check logs for successful replies
 # ─────────────────────────────────────────────
-async def verify_logs():
+async def verify_logs(start_log_offset=0):
     log(INFO, "=== SECTION 6: Log Verification ===")
     try:
-        with open("app.log", "r", encoding="utf-8", errors="ignore") as f:
-            content = f.read()
+        if os.path.exists("app.log"):
+            with open("app.log", "r", encoding="utf-8", errors="ignore") as f:
+                f.seek(start_log_offset)
+                content = f.read()
+        else:
+            content = ""
 
         checks = [
             ("Calendar booking created", "app.calendar.booking: Successfully booked"),
@@ -296,11 +300,8 @@ async def verify_logs():
         for label, pattern in checks:
             found = pattern in content
             if "No 401" in label or "No DB lock" in label:
-                # These should NOT be present (or only old ones)
-                # Check only last 200 lines
-                last_lines = "\n".join(content.split("\n")[-200:])
-                found = pattern not in last_lines
-                record(label, found, "clean" if found else f"FOUND: {pattern}")
+                # These should NOT be present in current run
+                record(label, not found, "clean" if not found else f"FOUND: {pattern}")
             else:
                 record(label, found, "found in logs" if found else "NOT FOUND")
     except Exception as e:
@@ -315,6 +316,14 @@ async def main():
     print("  CarBOLO E2E Test Suite")
     print(f"  Started: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     print("="*60 + "\n")
+
+    # Record log file offset before test starts
+    start_log_offset = 0
+    if os.path.exists("app.log"):
+        try:
+            start_log_offset = os.path.getsize("app.log")
+        except Exception:
+            pass
 
     await test_health()
     await asyncio.sleep(1)
@@ -331,7 +340,7 @@ async def main():
     await test_email_flow()
     await asyncio.sleep(2)
 
-    await verify_logs()
+    await verify_logs(start_log_offset)
 
     # ── Summary ──
     print("\n" + "="*60)

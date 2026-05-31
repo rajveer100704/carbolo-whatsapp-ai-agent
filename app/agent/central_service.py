@@ -1,4 +1,5 @@
 import logging
+import asyncio
 from sqlalchemy import select
 import app.db.session
 from app.db.models import ProcessedWebhookMessage
@@ -12,6 +13,16 @@ class DuplicateMessageError(Exception):
     pass
 
 class CentralAgentService:
+    _user_locks = {}
+    _locks_lock = asyncio.Lock()
+
+    @classmethod
+    async def _get_user_lock(cls, user_key: str) -> asyncio.Lock:
+        async with cls._locks_lock:
+            if user_key not in cls._user_locks:
+                cls._user_locks[user_key] = asyncio.Lock()
+            return cls._user_locks[user_key]
+
     async def process_message(
         self,
         channel: str,
@@ -29,60 +40,63 @@ class CentralAgentService:
             user_key = user_id
         else:
             user_key = f"{channel}:{user_id}"
-        
-        async with app.db.session.async_session_factory() as session:
-            try:
-                # 1. Message De-duplication Check
-                if message_id:
-                    dedup_key = f"{channel}:{message_id}"
-                    dedup_query = select(ProcessedWebhookMessage).where(ProcessedWebhookMessage.message_id == dedup_key)
-                    d_res = await session.execute(dedup_query)
-                    existing_msg = d_res.scalar_one_or_none()
 
-                    if existing_msg:
-                        logger.info(f"Duplicate message detected for channel {channel} (ID: {message_id}). Dropping request.")
-                        raise DuplicateMessageError(f"Duplicate message ID: {message_id}")
+        # Acquire lock for this user to serialize processing and prevent database race conditions
+        user_lock = await self._get_user_lock(user_key)
+        async with user_lock:
+            async with app.db.session.async_session_factory() as session:
+                try:
+                    # 1. Message De-duplication Check
+                    if message_id:
+                        dedup_key = f"{channel}:{message_id}"
+                        dedup_query = select(ProcessedWebhookMessage).where(ProcessedWebhookMessage.message_id == dedup_key)
+                        d_res = await session.execute(dedup_query)
+                        existing_msg = d_res.scalar_one_or_none()
 
-                    # Log message_id to processed messages
-                    new_msg = ProcessedWebhookMessage(message_id=dedup_key)
-                    session.add(new_msg)
-                    await session.flush()
+                        if existing_msg:
+                            logger.info(f"Duplicate message detected for channel {channel} (ID: {message_id}). Dropping request.")
+                            raise DuplicateMessageError(f"Duplicate message ID: {message_id}")
 
-                # 2. Get User State (with row lock)
-                user_state = await get_or_create_user_state(session, user_key)
-                current_state = user_state.state
+                        # Log message_id to processed messages
+                        new_msg = ProcessedWebhookMessage(message_id=dedup_key)
+                        session.add(new_msg)
+                        await session.flush()
 
-                # 3. Parse intent and entities
-                nlu_input = button_id if button_id else message
-                nlu_res = await parse_intent_with_llm(nlu_input, current_state)
-                
-                intent = nlu_res.get("intent")
-                entities = nlu_res.get("entities", {})
+                    # 2. Get User State (with row lock)
+                    user_state = await get_or_create_user_state(session, user_key)
+                    current_state = user_state.state
 
-                # 4. Execute Transition
-                reply_text = await transition_state(
-                    session=session,
-                    user_state=user_state,
-                    intent=intent,
-                    entities=entities,
-                    user_message=message,
-                    customer_name=customer_name,
-                    channel=channel
-                )
+                    # 3. Parse intent and entities
+                    nlu_input = button_id if button_id else message
+                    nlu_res = await parse_intent_with_llm(nlu_input, current_state)
+                    
+                    intent = nlu_res.get("intent")
+                    entities = nlu_res.get("entities", {})
 
-                # 5. Commit database changes
-                await session.commit()
+                    # 4. Execute Transition
+                    reply_text = await transition_state(
+                        session=session,
+                        user_state=user_state,
+                        intent=intent,
+                        entities=entities,
+                        user_message=message,
+                        customer_name=customer_name,
+                        channel=channel
+                    )
 
-                # Structured Log
-                logger.info(f"Structured Log: {{'user_key': '{user_key}', 'intent': '{intent}', 'state_before': '{current_state}', 'state_after': '{user_state.state}', 'action': 'reply_generated'}}")
+                    # 5. Commit database changes
+                    await session.commit()
 
-                return reply_text
+                    # Structured Log
+                    logger.info(f"Structured Log: {{'user_key': '{user_key}', 'intent': '{intent}', 'state_before': '{current_state}', 'state_after': '{user_state.state}', 'action': 'reply_generated'}}")
 
-            except DuplicateMessageError:
-                # Re-raise duplicate error so the controller handles it
-                raise
-            except Exception as e:
-                # Rollback database on any exception to release row locks
-                await session.rollback()
-                logger.exception(f"Error processing message for channel {channel}, user {user_id}: {e}")
-                raise e
+                    return reply_text
+
+                except DuplicateMessageError:
+                    # Re-raise duplicate error so the controller handles it
+                    raise
+                except Exception as e:
+                    # Rollback database on any exception to release row locks
+                    await session.rollback()
+                    logger.exception(f"Error processing message for channel {channel}, user {user_id}: {e}")
+                    raise e
