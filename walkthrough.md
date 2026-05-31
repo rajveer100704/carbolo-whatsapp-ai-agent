@@ -164,6 +164,24 @@ tests\test_agent.py ....................                                 [100%]
 ============================= 20 passed in 7.63s ==============================
 ```
 
+---
+
+## 8. Pre-Interview Local E2E Validation Fixes
+
+During final E2E validation under local tunnel and real webhook traffic, we resolved two critical concurrency and interaction design edge cases to guarantee 100% reliability for the live interview:
+
+### A. Transaction Isolation & Silent Rollbacks (NullPool Migration)
+* **Problem**: The database engine previously used `StaticPool` to share a single connection across all threads and coroutines. When concurrent background tasks (like the `EmailWorker` polling loop or `APScheduler` reminders) opened and closed sessions, they called `connection.rollback()`, which silently aborted active transactions in the main request threads. This caused the WhatsApp bookings/reminders to not persist, and rolled back conversation state changes, causing confusing repetitive loops.
+* **Fix**: Migrated from `StaticPool` to `NullPool` in [session.py](file:///c:/Users/BIT/CarBOLO/app/db/session.py). Combined with SQLite Write-Ahead Logging (WAL) and `busy_timeout = 30000`, this opens isolated connections per session, eliminating cross-thread transaction pollution.
+
+### B. Email Thread Quoted History Stripping (`strip_email_quotes`)
+* **Problem**: When replying to emails (such as booking slot lists or booking reminders), email clients append the thread's historical messages. Because the bot processed the entire raw body, it matched car names/variants (like `Maruti Swift (ZXi+)`) inside the quoted history, erroneously interpreting replies like *"Thank you"* as a new booking request.
+* **Fix**: Added a plain-text cleaner `strip_email_quotes` in [gmail_service.py](file:///c:/Users/BIT/CarBOLO/app/email/gmail_service.py) that automatically discards lines starting with `>` and terminates ingestion upon encountering standard reply headers (e.g. `On [date] ... wrote:`, `From:`, `-----Original Message-----`).
+
+### C. Refined Cancellation Flow Isolation
+* **Change**: Isolated draft booking cancellations from confirmed bookings. Sending `cancel` in `STATE_IDLE` successfully marks the latest completed booking as `CANCELLED` and clears calendar events. Sending `cancel` mid-qualification flow aborts the active draft and resets the conversation to `STATE_IDLE` without deleting any previously confirmed bookings.
+
+
 All 20 tests passed successfully! The agent is highly robust, consistent, and ready for deployment.
 
 

@@ -116,38 +116,41 @@ async def transition_state(
 
     # Global Cancellation Command
     if intent == "INTENT_CANCEL":
-        # Check if user has a completed booking to cancel
-        booking_query = select(Booking).where(
-            Booking.phone_number == user_state.phone_number,
-            Booking.status == "COMPLETED"
-        ).order_by(Booking.created_at.desc())
-        b_res = await session.execute(booking_query)
-        active_booking = b_res.scalars().first()
-        
-        user_state.state = STATE_IDLE
-        user_state.selected_car_model = None
-        user_state.selected_car_variant = None
-        user_state.slots_json = None
-        user_state.slot_generated_at = None
-        user_state.selected_slot_start = None
-        user_state.selected_slot_end = None
-        user_state.updated_at = now_naive
-        
-        if active_booking:
-            active_booking.status = "CANCELLED"
-            # Cancel Google Calendar event
-            delete_test_drive_event(active_booking.calendar_event_id)
+        if state == STATE_IDLE:
+            # Check if user has a completed booking to cancel
+            booking_query = select(Booking).where(
+                Booking.phone_number == user_state.phone_number,
+                Booking.status == "COMPLETED"
+            ).order_by(Booking.created_at.desc())
+            b_res = await session.execute(booking_query)
+            active_booking = b_res.scalars().first()
             
-            # Cancel reminders
-            rem_query = select(Reminder).where(Reminder.booking_id == active_booking.id)
-            r_res = await session.execute(rem_query)
-            reminders = r_res.scalars().all()
-            for r in reminders:
-                r.status = "CANCELLED"
-                ReminderScheduler.cancel_reminder_job(r.id)
-            return f"Your test drive for Maruti Suzuki {active_booking.car_model} has been successfully cancelled and reminders have been turned off."
+            if active_booking:
+                active_booking.status = "CANCELLED"
+                # Cancel Google Calendar event
+                delete_test_drive_event(active_booking.calendar_event_id)
+                
+                # Cancel reminders
+                rem_query = select(Reminder).where(Reminder.booking_id == active_booking.id)
+                r_res = await session.execute(rem_query)
+                reminders = r_res.scalars().all()
+                for r in reminders:
+                    r.status = "CANCELLED"
+                    ReminderScheduler.cancel_reminder_job(r.id)
+                return f"Your test drive for Maruti Suzuki {active_booking.car_model} has been successfully cancelled and reminders have been turned off."
             
-        return "Ok, test drive booking process has been canceled. Feel free to ask any other questions about our cars!"
+            return "I couldn't find any active test drive bookings to cancel. If you would like to book one, just let me know!"
+        else:
+            # Abort active booking draft flow
+            user_state.state = STATE_IDLE
+            user_state.selected_car_model = None
+            user_state.selected_car_variant = None
+            user_state.slots_json = None
+            user_state.slot_generated_at = None
+            user_state.selected_slot_start = None
+            user_state.selected_slot_end = None
+            user_state.updated_at = now_naive
+            return "Ok, the test drive booking process has been canceled. Feel free to ask any other questions about our cars!"
 
     # Global Reschedule Command
     if intent == "INTENT_RESCHEDULE":

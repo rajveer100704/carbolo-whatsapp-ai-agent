@@ -3,6 +3,7 @@ import json
 import imaplib
 import smtplib
 import email
+import re
 from email.mime.text import MIMEText
 from email.utils import parseaddr
 from datetime import datetime, timezone
@@ -12,6 +13,40 @@ from app.db.session import async_session_factory
 from app.db.models import ProcessedWebhookMessage
 
 logger = logging.getLogger(__name__)
+
+def strip_email_quotes(body: str) -> str:
+    """
+    Strips quoted reply history from an email body.
+    Removes lines starting with '>', and stops at standard reply dividers.
+    """
+    if not body:
+        return ""
+        
+    lines = []
+    for line in body.splitlines():
+        line_strip = line.strip()
+        
+        # Skip lines that are clearly quotes starting with '>'
+        if line_strip.startswith('>'):
+            continue
+            
+        # Stop if we hit standard dividers (case-insensitive matches)
+        # 1. Gmail-style: "On Sun, May 31, 2026 at 11:22 AM rajveer19255@gmail.com wrote:"
+        # 2. Outlook-style: "From: rajveer19255@gmail.com"
+        # 3. Horizontal rule / Divider lines: "-----Original Message-----"
+        if re.match(r'^on\s+.*\s+wrote\s*:', line_strip, re.IGNORECASE):
+            break
+        if re.search(r'^-+\s*original\s+message\s*-+$', line_strip, re.IGNORECASE):
+            break
+        if re.search(r'^-+\s*forwarded\s+message\s*-+$', line_strip, re.IGNORECASE):
+            break
+        if line_strip.startswith("From:") and len(line_strip) < 100:
+            break
+            
+        lines.append(line)
+        
+    return "\n".join(lines).strip()
+
 
 ALLOWED_SENDERS = {
     "carboloagent@gmail.com",
@@ -144,7 +179,7 @@ class GmailService:
                             "sender": e["sender"],
                             "sender_name": e.get("sender_name", "User"),
                             "subject": e.get("subject", "No Subject"),
-                            "body": e.get("body", ""),
+                            "body": strip_email_quotes(e.get("body", "")),
                             "message_id": e.get("message_id", "mock-msg-id")
                         })
                         e["processed"] = True
@@ -272,6 +307,8 @@ class GmailService:
                 else:
                     charset = msg.get_content_charset() or "utf-8"
                     body = msg.get_payload(decode=True).decode(charset, errors="ignore")
+
+                body = strip_email_quotes(body)
 
                 unread_list.append({
                     "sender": sender_email,

@@ -1,6 +1,6 @@
 import os
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
-from sqlalchemy.pool import StaticPool
+from sqlalchemy.pool import NullPool
 from sqlalchemy import event
 from app.db.models import Base
 
@@ -10,14 +10,14 @@ os.makedirs(DATABASE_DIR, exist_ok=True)
 
 DATABASE_URL = f"sqlite+aiosqlite:///{os.path.join(DATABASE_DIR, 'carbolo.db')}"
 
-# StaticPool: all coroutines share ONE connection — eliminates SQLite lock contention.
-# This is correct for SQLite + asyncio where you can't have multiple writers anyway.
+# NullPool: opens a fresh connection per session — ensures transaction isolation.
+# Combined with WAL mode and busy_timeout, this is the robust setup for SQLite.
 engine = create_async_engine(
     DATABASE_URL,
     connect_args={
         "check_same_thread": False,
     },
-    poolclass=StaticPool,  # Single shared connection — no "database is locked"
+    poolclass=NullPool,
 )
 
 # Enable WAL mode on every new connection so readers never block writers
